@@ -1,0 +1,45 @@
+import express from "express";
+const ownerRouter = express.Router();
+import {
+    addKpi,
+    addUser,
+    dltKpi,
+    dltUsers,
+    getDetails,
+    getKPIs,
+    getMe,
+    getUsers,
+    logout,
+    toggleKpi,
+    updateKpi,
+    updateMe,
+    updatePin,
+    updateStatus,
+    updateUser,
+} from "../controller/OwnerController.js";
+import verifyTokens from "../middleware/verifyMiddleware.js";
+
+//GET routers
+ownerRouter.get("/getKpis",verifyTokens,getKPIs);
+ownerRouter.get("/getUsers", verifyTokens,getUsers);
+ownerRouter.get("/me",verifyTokens,getMe)
+ownerRouter.get("/details",verifyTokens,getDetails)
+//POST routers
+ownerRouter.post("/addKpi", verifyTokens,addKpi);
+ownerRouter.post("/addUser",verifyTokens,addUser);
+ownerRouter.post("/logout",verifyTokens,logout)
+
+//PUT routers
+ownerRouter.put("/editKpi/:id", verifyTokens,updateKpi);
+ownerRouter.put("/updateUser/:id", verifyTokens,updateUser);
+ownerRouter.put("/editOwner/:id",verifyTokens,updateMe)
+
+//DELETE routers
+ownerRouter.delete("/dltKpi", verifyTokens,dltKpi);
+ownerRouter.delete("/deleteUser/:id", verifyTokens,dltUsers);
+
+//PATCH routers
+ownerRouter.patch("/updateStatus", verifyTokens,updateStatus)
+ownerRouter.patch("/kpi/:id/toggle", verifyTokens,toggleKpi)
+ownerRouter.patch("/changePin",verifyTokens,updatePin)
+export { ownerRouter };
