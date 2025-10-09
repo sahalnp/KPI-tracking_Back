@@ -1,4 +1,4 @@
-import { comparePassword, hashPassword } from "../utils/Password.js";
+import { hashPassword } from "../utils/Password.js";
 import { storage } from "../utils/storage.js";
 
 export const getDashboardData = async (req, res) => {
@@ -41,7 +41,7 @@ export const getScoreStaff = async (req, res) => {
 export const getKpis = async (req, res) => {
     try {
         const kpis = await storage.getKPIs();
-        
+
         res.status(200).json({ success: true, kpis });
     } catch (error) {
         console.error("Error fetching KPIs:", error);
@@ -68,7 +68,7 @@ export const addScore = async (req, res) => {
 export const getWalkouts = async (req, res) => {
     try {
         const walkouts = await storage.getWalkouts(req.user.id);
-        
+
         res.status(200).json({ success: true, walkouts });
     } catch (error) {
         console.error("Error fetching walkouts:", error);
@@ -78,11 +78,25 @@ export const getWalkouts = async (req, res) => {
         });
     }
 };
+// Example using Express + Prisma
+export const walkOutById = async (req, res) => {
+    const { id } = req.params;
+    try {
+        const walkout = await storage.getWalkoutsByID(id);
+        res.json({ success: true, walkout });
+    } catch (err) {
+        res.status(500).json({
+            success: false,
+            message: "Failed to fetch walkout",
+        });
+    }
+};
+
 export const addWalkout = async (req, res) => {
     try {
         const walkout = await storage.addWalkout(req.body, req.user.id);
-        console.log(walkout,"5647879");
-        
+        console.log(walkout, "5647879");
+
         res.status(200).json({ success: true, walkout });
     } catch (error) {
         console.error("Error adding walkout:", error);
@@ -124,7 +138,7 @@ export const deleteWalkout = async (req, res) => {
 export const getUsers = async (req, res) => {
     try {
         const users = await storage.getUserByFloor(req.user.id);
-        
+
         res.status(200).json({ success: true, users });
     } catch (error) {
         console.log(error);
@@ -194,6 +208,20 @@ export const getMe = async (req, res) => {
         });
     }
 };
+export const editMe = async (req, res) => {
+    console.log("sdfdslkfdslkj");
+    
+    try {
+        await storage.updateMeSupervisor(req.user.id, req.body);
+        res.status(200).json({ success: true });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json({
+            success: false,
+            error: "Internal Server Error",
+        });
+    }
+};
 export const toggleStaff = async (req, res) => {
     try {
         await storage.toggleStaff(req.params.id, req.body.active_flag);
@@ -236,8 +264,8 @@ export const walkOutExport = async (req, res) => {
     const { type } = req.query;
     try {
         const walkoutData = await storage.walkoutExport(type);
-        console.log(walkoutData,"sdfklsdfjklds");
-        
+        console.log(walkoutData, "sdfklsdfjklds");
+
         res.status(200).json({ success: true, walkoutData });
     } catch (error) {
         console.log(error);
@@ -252,7 +280,6 @@ export const fetchItem = async (req, res) => {
 
     try {
         const items = await storage.fetchItem(query);
-        console.log(items);
 
         res.status(200).json({ success: true, items });
     } catch (error) {

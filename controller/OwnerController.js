@@ -1,10 +1,12 @@
+import { prisma } from "../index.js";
 import { hashPassword } from "../utils/Password.js";
 import { storage } from "../utils/storage.js";
 
 export const getKPIs = async (req, res) => {
     try {
+        console.log("sdfkldsjflkjfl");
+        
         const kpis = await storage.getKPIs();
-
         res.status(200).json({ success: true, kpis });
     } catch (error) {
         console.error("Error fetching KPIs:", error);
@@ -286,6 +288,37 @@ export const logout=async (req, res) => {
     } catch (error) {
         console.error("Error toggling KPI:", error);
         res.status(501).json({
+            success: false,
+            error: "Internal Server Error",
+        });
+    }
+};
+export const getScoreEmployee = async (req, res) => {
+    
+    try {
+        const staffs = await storage.getEmployee(req.user.id);
+        res.status(200).json({ success: true, staffs });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: "Internal Server Error",
+        });
+    }
+};
+export const addEmployeeScore = async (req, res) => {
+    try {
+        console.log(req.body,"0000000");
+        
+        const { scores, staffId } = req.body;
+        const id = req.user.id;
+        const rese=await storage.addScore(scores, staffId, id);
+        const vali=await storage.Get()
+        console.log(rese,"s5645645");
+        
+        res.status(200).json({ success: true });
+    } catch (error) {
+        console.error("Error adding score:", error);
+        res.status(500).json({
             success: false,
             error: "Internal Server Error",
         });

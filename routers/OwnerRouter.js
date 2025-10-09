@@ -1,6 +1,7 @@
 import express from "express";
 const ownerRouter = express.Router();
 import {
+    addEmployeeScore,
     addKpi,
     addUser,
     dltKpi,
@@ -8,6 +9,7 @@ import {
     getDetails,
     getKPIs,
     getMe,
+    getScoreEmployee,
     getUsers,
     logout,
     toggleKpi,
@@ -24,10 +26,13 @@ ownerRouter.get("/getKpis",verifyTokens,getKPIs);
 ownerRouter.get("/getUsers", verifyTokens,getUsers);
 ownerRouter.get("/me",verifyTokens,getMe)
 ownerRouter.get("/details",verifyTokens,getDetails)
+ownerRouter.get("/staff-scoring",verifyTokens,getScoreEmployee)
 //POST routers
 ownerRouter.post("/addKpi", verifyTokens,addKpi);
 ownerRouter.post("/addUser",verifyTokens,addUser);
 ownerRouter.post("/logout",verifyTokens,logout)
+ownerRouter.post("/submit-score",verifyTokens,addEmployeeScore)
+
 
 //PUT routers
 ownerRouter.put("/editKpi/:id", verifyTokens,updateKpi);

@@ -5,6 +5,7 @@ import {
     addWalkout,
     deleteWalkout,
     dltUser,
+    editMe,
     editUser,
     editWalkout,
     fetchItem,
@@ -37,6 +38,7 @@ supervisorRouter.put("/editUser/:id", verifyTokens, editUser);
 supervisorRouter.delete("/deleteUser/:id", verifyTokens, dltUser);
 supervisorRouter.patch("/toggleStaff/:id", verifyTokens, toggleStaff);
 supervisorRouter.get("/getme", verifyTokens, getMe);
+supervisorRouter.put("/editMe",verifyTokens,editMe)
 supervisorRouter.put("/updatePin", verifyTokens, updatePin);
 supervisorRouter.post("/logout", verifyTokens, logoutSupervisor);
 supervisorRouter.get("/export-excel", verifyTokens, walkOutExport);

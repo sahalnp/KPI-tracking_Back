@@ -576,7 +576,11 @@ class DatabaseStorage {
         });
 
         const usersInFloor = await prisma.user.findMany({
-            where: { floor_id: supervisor.floor_id, active_flag: true },
+            where: {
+                floor_id: supervisor.floor_id,
+                isDlt: false,
+                role: "Staff",
+            },
             select: { id: true },
         });
 
@@ -591,7 +595,6 @@ class DatabaseStorage {
             },
             _avg: { points: true },
         });
-
         const walkOutCount = await prisma.walkOut.count({
             where: {
                 staffId: { in: userIds },
@@ -688,8 +691,6 @@ class DatabaseStorage {
     }
     async getStaff(id) {
         const supervisor = await prisma.user.findUnique({ where: { id } });
-        console.log(supervisor);
-
         return await prisma.user.findMany({
             where: {
                 role: "Staff",
@@ -698,17 +699,34 @@ class DatabaseStorage {
             },
         });
     }
-    async addScore(scores, staffId, supervisorId) {
+    async getEmployee() {
+        return await prisma.user.findMany({
+            where: {
+                role: { not: "Owner" },
+                isDlt: false,
+            },
+        });
+    }
+    async addScore(scores, staffId, submittedId) {
         for (const score of scores) {
-            const find = await prisma.score.findFirst({
-                where: { kpi_id: score.kpi_id, user_id: staffId },
-                orderBy: { created_at: "desc" },
+            // Find the latest score for this user & KPI
+            const latestScore = await prisma.score.findFirst({
+                where: {
+                    user_id: staffId,
+                    kpi_id: score.kpi_id,
+                    isDlt: false, // exclude deleted scores
+                },
+                orderBy: {
+                    created_at: "desc", // get the most recent
+                },
             });
-
+            console.log(latestScore,"123456789");
+            
             let trend = "same";
-            if (find) {
-                if (find.points > score.points) trend = "decreased";
-                else if (find.points < score.points) trend = "increased";
+
+            if (latestScore) {
+                if (score.points > latestScore.points) trend = "up";
+                else if (score.points < latestScore.points) trend = "down";
             }
 
             await prisma.score.create({
@@ -717,7 +735,7 @@ class DatabaseStorage {
                     user_id: staffId,
                     points: score.points,
                     trend,
-                    evalutedby_user_id: supervisorId,
+                    evalutedby_user_id: submittedId,
                     status: "pending",
                     comment: score.comment,
                     evalutedDate: null,
@@ -725,6 +743,7 @@ class DatabaseStorage {
             });
         }
     }
+
     async getWalkouts(supervisorId) {
         const supervisor = await prisma.user.findUnique({
             where: { id: supervisorId },
@@ -807,7 +826,7 @@ class DatabaseStorage {
             ...data,
         };
 
-        return prisma.walkOut.create({
+        const walkout = await prisma.walkOut.create({
             data: {
                 description: data.description,
                 priority: data.priority,
@@ -826,7 +845,15 @@ class DatabaseStorage {
                     },
                 },
             },
+            include: {
+                staff: true,
+                submittedBy: true,
+                itemName: true,
+                type: true,
+            },
         });
+
+        return walkout; // now the frontend receives staff, itemName, type objects
     }
 
     async editWalkout(data, id, supervisorId) {
@@ -925,6 +952,7 @@ class DatabaseStorage {
                 section: data.section,
                 mobile: data.mobile,
                 role: "Staff",
+                uniqueId: data.uniqueId,
             },
         });
     }
@@ -1349,6 +1377,24 @@ class DatabaseStorage {
             where: { name },
         });
     }
+    async getWalkoutsByID(id) {
+        return await prisma.walkOut.findUnique({
+            where: { id: Number(id) },
+            include: {
+                staff: true,
+                submittedBy: true,
+                itemName: true,
+                type: true,
+            },
+        });
+    }
+    async updateMeSupervisor(id, data) {
+        return await prisma.user.update({
+            where: { id },
+            data: data,
+        });
+    }
+   
 }
 
 export const storage = new DatabaseStorage();

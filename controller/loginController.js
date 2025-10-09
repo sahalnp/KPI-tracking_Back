@@ -10,8 +10,11 @@ import { storage } from "../utils/storage.js";
 
 export const sendMail = async (req, res) => {
     const { email, mobile } = req.body;
+    
     try {
         const find = await storage.getUser(mobile);
+        console.log(find,"sdjfkldslfk");
+        
         if (!find) {
             return res.status(404).json({ message: "User not found" });
         }
