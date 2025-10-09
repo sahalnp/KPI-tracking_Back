@@ -1,5 +1,5 @@
 import express from "express";
-const ownerRouter = express.Router();
+const OwnerRouter = express.Router();
 import {
     addEmployeeScore,
     addKpi,
@@ -47,4 +47,4 @@ ownerRouter.delete("/deleteUser/:id", verifyTokens,dltUsers);
 ownerRouter.patch("/updateStatus", verifyTokens,updateStatus)
 ownerRouter.patch("/kpi/:id/toggle", verifyTokens,toggleKpi)
 ownerRouter.patch("/changePin",verifyTokens,updatePin)
-export { ownerRouter };
+export { OwnerRouter };

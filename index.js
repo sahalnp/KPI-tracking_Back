@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 import cors from "cors";
 import bodyParser from "body-parser";
 import { PrismaClient } from "@prisma/client";
-import { ownerRouter } from "./routers/ownerRouter.js";
+
 import limiter from "./middleware/limiter.js";
 import loginRouter from "./routers/LoginRouter.js";
 import { staffRouter } from "./routers/StaffRouter.js";
@@ -13,7 +13,9 @@ import { dirname, join } from "path";
 import { supervisorRouter } from "./routers/SupervisorRouter.js";
 import accountRouter from "./routers/AccountantRouter.js";
 import fs from "fs";
-console.log(fs.readdirSync("./routers")); // See what files exist
+import { OwnerRouter } from "./routers/ShopOwnerRouter.js";
+
+console.log(fs.readdirSync("./routers")); 
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -36,11 +38,11 @@ app.use(express.static(join(__dirname, "public")));
 app.use(cookieParser());
 
 // Routes
-app.use("/api/owner", ownerRouter);
 app.use("/api",loginRouter)
 app.use("/api/staff",staffRouter)
 app.use("/api/supervisor",supervisorRouter)
 app.use("/api/accountant",accountRouter)
+app.use("/api/owner",OwnerRouter)
 
 // When running on Vercel, we must export the app instead of listening
 // so Vercel can handle the serverless request lifecycle.
