@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 import cors from "cors";
 import bodyParser from "body-parser";
 import { PrismaClient } from "@prisma/client";
-import { ownerRouter } from "./routers/OwnerRouter.js";
+import { ownerRouter } from "./routers/ownerRouter.js";
 import limiter from "./middleware/limiter.js";
 import loginRouter from "./routers/LoginRouter.js";
 import { staffRouter } from "./routers/StaffRouter.js";
@@ -40,8 +40,13 @@ app.use("/api",loginRouter)
 app.use("/api/staff",staffRouter)
 app.use("/api/supervisor",supervisorRouter)
 app.use("/api/accountant",accountRouter)
-// Start server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT,"0.0.0.0",  () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+// When running on Vercel, we must export the app instead of listening
+// so Vercel can handle the serverless request lifecycle.
+if (!process.env.VERCEL) {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server is running on port ${PORT}`);
+  });
+}
+
+export default app;
