@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 import cors from "cors";
 import bodyParser from "body-parser";
 import { PrismaClient } from "@prisma/client";
-import { ownerRouter } from "./routers/OwnerRouter.js";
+import { ownerRouter } from "./routers/ownerRouter.js";
 import limiter from "./middleware/limiter.js";
 import loginRouter from "./routers/LoginRouter.js";
 import { staffRouter } from "./routers/StaffRouter.js";
