@@ -24,12 +24,12 @@ dotenv.config();
 
 const app = express();
 export const prisma = new PrismaClient();
-
 app.use(cors({
-  origin: "http://10.63.194.166:5173",
-  methods: ["GET", "POST", "PUT", "DELETE","PATCH"],
+  origin: process.env.FRONTEND_URL, 
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
   credentials: true
 }));
+
 app.use(limiter);
 
 app.use(bodyParser.json());
