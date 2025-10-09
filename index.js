@@ -13,7 +13,7 @@ import { dirname, join } from "path";
 import { supervisorRouter } from "./routers/SupervisorRouter.js";
 import accountRouter from "./routers/AccountantRouter.js";
 import fs from "fs";
-import { OwnerRouter } from "./routers/ShopOwnerRouter.js";
+import { ownerRouter } from "./routers/ShopOwnerRouter.js";
 
 console.log(fs.readdirSync("./routers")); 
 
@@ -42,7 +42,7 @@ app.use("/api",loginRouter)
 app.use("/api/staff",staffRouter)
 app.use("/api/supervisor",supervisorRouter)
 app.use("/api/accountant",accountRouter)
-app.use("/api/owner",OwnerRouter)
+app.use("/api/owner",ownerRouter)
 
 // When running on Vercel, we must export the app instead of listening
 // so Vercel can handle the serverless request lifecycle.
