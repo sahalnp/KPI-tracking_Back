@@ -12,6 +12,9 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { supervisorRouter } from "./routers/SupervisorRouter.js";
 import accountRouter from "./routers/AccountantRouter.js";
+import fs from "fs";
+console.log(fs.readdirSync("./routers")); // See what files exist
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
