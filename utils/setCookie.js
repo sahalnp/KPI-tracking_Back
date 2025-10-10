@@ -23,7 +23,7 @@ export const setCookie = (res, accesstoken, refreshtoken) => {
 
   res.cookie("accesstoken", accesstoken, {
     httpOnly: true,
-    secure: isProd,            // must be true if sameSite = "none"
+    secure: isProd,       
     sameSite: isProd ? "none" : "lax", 
     maxAge: 15 * 60 * 1000,
     path: "/"
