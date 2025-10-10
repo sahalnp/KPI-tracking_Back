@@ -31,8 +31,7 @@ app.use(cors({
   credentials: true
 }));
 
-// handle preflight
-app.options("*", cors());
+
 
 
 app.use(limiter);
@@ -48,15 +47,16 @@ app.use("/api/staff",staffRouter)
 app.use("/api/supervisor",supervisorRouter)
 app.use("/api/accountant",accountRouter)
 app.use("/api/owner",ownerRouter)
+app.use((req, res) => {
+  res.status(404).json({ success: false, message: "Route not found" });
+});
 
-// When running on Vercel, we must export the app instead of listening
-// so Vercel can handle the serverless request lifecycle.
-if (!process.env.VERCEL) {
+
   const PORT = process.env.PORT || 3000;
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server is running on port ${PORT}`);
   });
-}
+
 
 export default app;
 
