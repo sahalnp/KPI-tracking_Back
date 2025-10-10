@@ -21,7 +21,7 @@ const app = express();
 export const prisma = new PrismaClient();
 app.use(cors({
   origin: [
-    "https://kpi-trackingfrontent.vercel.app",
+    "https://kpi-tracking-front.vercel.app/",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "http://localhost:3000",
