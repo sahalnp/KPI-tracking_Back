@@ -12,11 +12,7 @@ import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import { supervisorRouter } from "./routers/SupervisorRouter.js";
 import accountRouter from "./routers/AccountantRouter.js";
-import fs from "fs";
 import { ownerRouter } from "./routers/ShopOwnerRouter.js";
-
-console.log(fs.readdirSync("./routers")); 
-
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -25,7 +21,7 @@ dotenv.config();
 const app = express();
 export const prisma = new PrismaClient();
 app.use(cors({
-  origin: process.env.FRONTEND_URL, 
+  origin: ["https://kpi-trackingfrontent.vercel.app"], 
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
   credentials: true
 }));
@@ -36,6 +32,10 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(express.static(join(__dirname, "public")));
 app.use(cookieParser());
+app.use((req, res, next) => {
+  console.log("Incoming:", req.method, req.url);
+  next();
+});
 
 // Routes
 app.use("/api",loginRouter)

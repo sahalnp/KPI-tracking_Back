@@ -29,6 +29,8 @@ export const sendMail = async (req, res) => {
     }
 };
 export const loginUser = async (req, res) => {
+    console.log("sdjfkdsjkfjfdksjfklsfjklsdfsklfsdlkfjskljf");
+    
     const { mobile, pin } = req.body;
     try {
         const user = await storage.getUser(mobile);
