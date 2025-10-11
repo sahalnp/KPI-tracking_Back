@@ -1,10 +1,5 @@
-// server/config/sendMail.js
 import axios from "axios";
-import dotenv from "dotenv";
 
-dotenv.config();
-
-// Simple Brevo API client using axios
 class BrevoClient {
   constructor(apiKey) {
     this.apiKey = apiKey;
