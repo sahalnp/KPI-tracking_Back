@@ -282,12 +282,11 @@ class DatabaseStorage {
     }
     async staffChangePin(staffId, newPin) {
         const now = new Date();
-        const pinExpiresAt = new Date(now.getTime() + 15 * 60 * 1000);
         return await prisma.user.update({
             where: { id: staffId },
             data: {
                 pin_hash: newPin,
-                pin_expires_at: pinExpiresAt,
+                pin_expires_at: null,
             },
         });
     }

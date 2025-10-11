@@ -9,6 +9,8 @@ import generateUnique6DigitPin from "../utils/TokenGenerator.js";
 import { storage } from "../utils/storage.js";
 
 export const sendMail = async (req, res) => {
+    console.log("sdlkflksjfdklsfjskljfdslkfjdslkfjdlksfjskldjflksdjfklsdjfklsdfjklsdfjkl");
+    
     const { email, mobile } = req.body;
     
     try {
