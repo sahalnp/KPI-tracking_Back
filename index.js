@@ -21,12 +21,17 @@ const app = express();
 export const prisma = new PrismaClient();
 app.use(cors({
   origin: [
-    "https://kpi-tracking-front.onrender.com", // your production frontend (Render or Vercel)
-    "http://localhost:3001",                     // backend test frontend
-    "http://10.63.194.166:3001",                // LAN dev frontend if needed
+    "https://kpi-tracking-front.onrender.com", // Render frontend
+    "https://kpi-trackingfrontent.vercel.app", // Vercel frontend
+    "https://*.vercel.app",                     // All Vercel frontends
+    "http://localhost:3001",                    // local development
+    "http://localhost:3000",                    // local development
+    "http://10.63.194.166:3001",               // LAN dev frontend
   ],
-  methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
-  credentials: true
+  methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+  credentials: true,
+  allowedHeaders: ["Content-Type", "Authorization", "Cookie"],
+  exposedHeaders: ["Set-Cookie"]
 }));
 
 
