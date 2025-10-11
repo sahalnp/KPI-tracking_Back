@@ -2,6 +2,7 @@
 
 // Updated forgetPin function
 import brevoClient from "../config/sendMail.js";
+import gmailClient from "../config/gmailSmtp.js";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
 import fs from "fs";
@@ -70,11 +71,10 @@ export async function forgetPin(email, pin) {
     const logoBuffer = await fs.promises.readFile(logoPath);
     const logoBase64 = logoBuffer.toString("base64");
 
-    // Send email using Brevo
-    const response = await brevoClient.sendTransacEmail({
+    const emailData = {
       to: [{ email, name: "Customer" }],
       sender: {
-        email: process.env.VERIFIED_SENDER_EMAIL,
+        email: process.env.VERIFIED_SENDER_EMAIL || process.env.GMAIL_USER,
         name: "Century Fashion City",
       },
       subject: "Password Reset PIN - Century Fashion City",
@@ -86,12 +86,23 @@ export async function forgetPin(email, pin) {
           cid: "logo",
         },
       ],
-    });
+    };
 
-    console.log("PIN email sent successfully via Brevo:", response);
-    return pin;
+    // Try Brevo first
+    try {
+      const response = await brevoClient.sendTransacEmail(emailData);
+      console.log("PIN email sent successfully via Brevo:", response);
+      return pin;
+    } catch (brevoError) {
+      console.error("Brevo failed, trying Gmail SMTP:", brevoError.message);
+      
+      // Fallback to Gmail SMTP
+      const gmailResponse = await gmailClient.sendEmail(emailData);
+      console.log("PIN email sent successfully via Gmail SMTP:", gmailResponse.messageId);
+      return pin;
+    }
   } catch (error) {
-    console.error("Brevo error:", error);
-    throw new Error("Failed to send PIN email.");
+    console.error("All email services failed:", error);
+    throw new Error("Failed to send PIN email. Please check your email configuration.");
   }
 }

@@ -22,10 +22,8 @@ export const prisma = new PrismaClient();
 app.use(cors({
   origin: [
     "https://kpi-tracking-front.onrender.com", // your production frontend (Render or Vercel)
-    "http://localhost:5173",                     // local dev frontend
-    "http://127.0.0.1:5173",                     // local dev frontend alternative
-    "http://localhost:3000",                     // backend test frontend
-    "http://10.63.194.166:5173",                // LAN dev frontend if needed
+    "http://localhost:3001",                     // backend test frontend
+    "http://10.63.194.166:3001",                // LAN dev frontend if needed
   ],
   methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
   credentials: true
