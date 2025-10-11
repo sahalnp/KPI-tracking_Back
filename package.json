@@ -13,9 +13,10 @@
   "license": "ISC",
   "type": "module",
   "dependencies": {
+    "@getbrevo/brevo": "^3.0.1",
     "@prisma/client": "^6.16.2",
-    "@sendinblue/client": "^3.3.1",
     "@vercel/speed-insights": "^1.2.0",
+    "axios": "^1.12.2",
     "bcrypt": "^6.0.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
