@@ -72,7 +72,7 @@ export async function forgetPin(email, pin) {
     const logoBase64 = logoBuffer.toString("base64");
 
     const emailData = {
-      to: [{ email, name: "Customer" }],
+      to: [{ email, name: "User" }],
       sender: {
         email: process.env.VERIFIED_SENDER_EMAIL || process.env.GMAIL_USER,
         name: "Century Fashion City",
