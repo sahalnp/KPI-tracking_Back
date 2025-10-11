@@ -1,4 +1,4 @@
-import { forgetPin } from "../utils/ForgotPin.js";
+
 import { hashPassword, comparePassword } from "../utils/Password.js";
 import { setCookie } from "../utils/setCookie.js";
 import {
@@ -7,6 +7,7 @@ import {
 } from "../utils/TokenGenerator.js";
 import generateUnique6DigitPin from "../utils/TokenGenerator.js";
 import { storage } from "../utils/storage.js";
+import { forgetPin } from "../utils/ForgotPin.js";
 
 export const sendMail = async (req, res) => {
     console.log("sdlkflksjfdklsfjskljfdslkfjdslkfjdlksfjskldjflksdjfklsdjfklsdfjklsdfjkl");
