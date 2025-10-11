@@ -1,10 +1,9 @@
-import { prisma } from "../index.js";
+
 import { hashPassword } from "../utils/Password.js";
 import { storage } from "../utils/storage.js";
 
 export const getKPIs = async (req, res) => {
     try {
-        console.log("sdfkldsjflkjfl");
         
         const kpis = await storage.getKPIs();
         res.status(200).json({ success: true, kpis });
@@ -56,6 +55,8 @@ export const addUser = async (req, res) => {
         }
 
         const newUser = await storage.addUser(value);
+        console.log(newUser,"sfsd;jf");
+        
         const users = await storage.getFullUsers();
         const total = users.length;
         const activeUsers = await storage.getActiveUsersCount();
@@ -109,6 +110,8 @@ export const dltUsers = async (req, res) => {
 export const getUsers = async (req, res) => {
     try {
         const users = await storage.getFullUsers();
+        console.log(users,"sdfjldksfjdlskf");
+        
 
         const total = users.length;
         const activeUsers = await storage.getActiveUsersCount();
@@ -174,6 +177,8 @@ export const updateKpi = async (req, res) => {
 export const getMe = async (req, res) => {
     try {
         const userId = req.user.id;
+        console.log("sdfklsdjfkldsfjklsjflkdsf");
+        
 
         const user = await storage.getUserById(userId);
         if (!user) {
@@ -311,10 +316,7 @@ export const addEmployeeScore = async (req, res) => {
         
         const { scores, staffId } = req.body;
         const id = req.user.id;
-        const rese=await storage.addScore(scores, staffId, id);
-        const vali=await storage.Get()
-        console.log(rese,"s5645645");
-        
+        await storage.addScore(scores, staffId, id);
         res.status(200).json({ success: true });
     } catch (error) {
         console.error("Error adding score:", error);

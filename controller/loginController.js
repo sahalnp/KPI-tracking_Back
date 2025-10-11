@@ -1,4 +1,3 @@
-
 import { hashPassword, comparePassword } from "../utils/Password.js";
 import { setCookie } from "../utils/setCookie.js";
 import {
@@ -10,14 +9,11 @@ import { storage } from "../utils/storage.js";
 import { forgetPin } from "../utils/ForgotPin.js";
 
 export const sendMail = async (req, res) => {
-    console.log("sdlkflksjfdklsfjskljfdslkfjdslkfjdlksfjskldjflksdjfklsdjfklsdfjklsdfjkl");
-    
     const { email, mobile } = req.body;
-    
+
     try {
         const find = await storage.getUser(mobile);
-        console.log(find,"sdjfkldslfk");
-        
+
         if (!find) {
             return res.status(404).json({ message: "User not found" });
         }
@@ -32,12 +28,13 @@ export const sendMail = async (req, res) => {
     }
 };
 export const loginUser = async (req, res) => {
-    console.log("sdjfkdsjkfjfdksjfklsfjklsdfsklfsdlkfjskljf");
+   
     
+
     const { mobile, pin } = req.body;
     try {
         const user = await storage.getUser(mobile);
-        
+ console.log(user);
         if (!user) {
             return res.status(404).json({
                 success: false,
@@ -51,7 +48,6 @@ export const loginUser = async (req, res) => {
             });
         }
 
-
         const pinMatch = await comparePassword(pin, user.pin_hash);
         if (!pinMatch) {
             return res.status(401).json({
@@ -59,7 +55,7 @@ export const loginUser = async (req, res) => {
                 message: "Invalid PIN",
             });
         }
-        await storage.active(user.id)
+        await storage.active(user.id);
 
         const findToken = await storage.getToken(mobile);
 

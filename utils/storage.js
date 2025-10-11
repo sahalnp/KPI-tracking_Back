@@ -13,6 +13,9 @@ class DatabaseStorage {
     async getKPIs() {
         const kpis = await prisma.kPI.findMany({
             where: { isDlt: false },
+            orderBy: {
+                created_at: "desc",
+            },
         });
 
         const frequencies = kpis.map((kpi) => kpi.frequency);
@@ -35,9 +38,18 @@ class DatabaseStorage {
             },
             include: {
                 floor: true,
+                scores: {
+                    include: {
+                        kpi: true,
+                    },
+                },
+            },
+            orderBy: {
+                created_at: "desc",
             },
         });
     }
+
     async addKpi(value) {
         return (await prisma.kPI.create({ data: value })) || null;
     }
@@ -667,19 +679,19 @@ class DatabaseStorage {
         });
         const userIds = usersInFloor.map((u) => u.id);
 
-        const walkOuts = await prisma.walkOut.findMany({
-            where: {
-                staffId: { in: userIds },
-                submittedBy_id: supervisorId,
-                isDlt: false,
-                created_at: { gte: startDate },
-            },
-            include: {
-                type: true,
-                itemName: true,
-            },
-            orderBy: { created_at: "desc" },
-        });
+        // const walkOuts = await prisma.walkOut.findMany({
+        //     where: {
+        //         staffId: { in: userIds },
+        //         submittedBy_id: supervisorId,
+        //         isDlt: false,
+        //         created_at: { gte: startDate },
+        //     },
+        //     include: {
+        //         type: true,
+        //         itemName: true,
+        //     },
+        //     orderBy: { created_at: "desc" },
+        // });
 
         const pieData = Object.entries(nameCounts).map(([name, value]) => ({
             name,
@@ -713,14 +725,13 @@ class DatabaseStorage {
                 where: {
                     user_id: staffId,
                     kpi_id: score.kpi_id,
-                    isDlt: false, // exclude deleted scores
+                    isDlt: false,
                 },
                 orderBy: {
                     created_at: "desc", // get the most recent
                 },
             });
-            console.log(latestScore,"123456789");
-            
+
             let trend = "same";
 
             if (latestScore) {
@@ -735,7 +746,7 @@ class DatabaseStorage {
                     points: score.points,
                     trend,
                     evalutedby_user_id: submittedId,
-                    status: "pending",
+                    status: "approved",
                     comment: score.comment,
                     evalutedDate: null,
                 },
@@ -995,13 +1006,7 @@ class DatabaseStorage {
             },
         });
     }
-    async checkPin(id) {
-        return await prisma.user.findFirst({
-            where: {
-                id,
-            },
-        });
-    }
+    
     async active(id) {
         return await prisma.user.update({
             where: { id },
@@ -1393,7 +1398,6 @@ class DatabaseStorage {
             data: data,
         });
     }
-   
 }
 
 export const storage = new DatabaseStorage();

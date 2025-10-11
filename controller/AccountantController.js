@@ -1,4 +1,4 @@
-import { comparePassword } from "../utils/Password.js";
+import { comparePassword, hashPassword } from "../utils/Password.js";
 import { storage } from "../utils/storage.js";
 import fs from "fs";
 import csv from "csv-parser";
@@ -146,18 +146,7 @@ export const editProfile = async (req, res) => {
 };
 export const updatePin = async (req, res) => {
     try {
-        let { oldPin, newPin } = req.body;
-        const checkPin = await storage.checkPin(req.user.id);
-
-        const isMatch = await comparePassword(
-            String(oldPin),
-            checkPin.pin_hash
-        );
-        if (!isMatch) {
-            return res
-                .status(400)
-                .json({ success: false, message: "Old PIN is incorrect" });
-        }
+        let {  newPin } = req.body;
         newPin = await hashPassword(newPin);
         await storage.staffChangePin(req.user.id, newPin);
         res.status(200).json({ success: true });
