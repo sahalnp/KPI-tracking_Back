@@ -6,16 +6,21 @@ import {
     addUser,
     dltKpi,
     dltUsers,
+    exportStaffReport,
     getDetails,
+    getEditScore,
     getKPIs,
     getMe,
     getScoreEmployee,
     getUsers,
     logout,
+    scoreKpi,
+    staffReport,
     toggleKpi,
     updateKpi,
     updateMe,
     updatePin,
+    updateScore,
     updateStatus,
     updateUser,
 } from "../controller/OwnerController.js";
@@ -23,10 +28,14 @@ import verifyTokens from "../middleware/verifyMiddleware.js";
 
 //GET routers
 ownerRouter.get("/getKpis",verifyTokens,getKPIs);
+ownerRouter.get("/scoreKPI",verifyTokens,scoreKpi)
 ownerRouter.get("/getUsers", verifyTokens,getUsers);
 ownerRouter.get("/me",verifyTokens,getMe)
 ownerRouter.get("/details",verifyTokens,getDetails)
 ownerRouter.get("/staff-scoring",verifyTokens,getScoreEmployee)
+ownerRouter.get("/userscore/:id",verifyTokens,getEditScore)
+ownerRouter.get("/staffReport",verifyTokens,staffReport)
+ownerRouter.get("/staffReport/export",verifyTokens,exportStaffReport)
 //POST routers
 ownerRouter.post("/addKpi", verifyTokens,addKpi);
 ownerRouter.post("/addUser",verifyTokens,addUser);
@@ -38,6 +47,8 @@ ownerRouter.post("/submit-score",verifyTokens,addEmployeeScore)
 ownerRouter.put("/editKpi/:id", verifyTokens,updateKpi);
 ownerRouter.put("/updateUser/:id", verifyTokens,updateUser);
 ownerRouter.put("/editOwner/:id",verifyTokens,updateMe)
+ownerRouter.put("/updateScore/:id",verifyTokens,updateScore)
+
 
 //DELETE routers
 ownerRouter.delete("/dltKpi", verifyTokens,dltKpi);

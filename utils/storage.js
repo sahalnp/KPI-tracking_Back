@@ -8,6 +8,11 @@ import {
     subWeeks,
     startOfYear,
     endOfYear,
+    isSameDay,
+    addDays,
+    addMonths,
+    startOfDay,
+    endOfDay,
 } from "date-fns";
 class DatabaseStorage {
     async getKPIs() {
@@ -520,8 +525,6 @@ class DatabaseStorage {
         };
     }
     async getAccountData(staffId) {
-        console.log(staffId, "sfsdklflkfj");
-
         const user = await prisma.user.findFirst({
             where: { id: staffId, isDlt: false },
             include: {
@@ -531,7 +534,6 @@ class DatabaseStorage {
         const walkOuts = await prisma.walkOut.findMany({
             where: { staffId },
         });
-        console.log(walkOuts, user, "sfjsdlkfjkls");
 
         return { walkOuts, user };
     }
@@ -711,39 +713,103 @@ class DatabaseStorage {
         });
     }
     async getEmployee() {
-        return await prisma.user.findMany({
+        const users = await prisma.user.findMany({
             where: {
                 role: { not: "Owner" },
+
                 isDlt: false,
             },
+            include: {
+                scores: true,
+
+                floor: true,
+            },
+            orderBy: {
+                created_at: "desc",
+            },
         });
+
+        const today = new Date().toDateString();
+
+        const usersWithFlag = users.map((user) => {
+            const latestScore = user.scores
+                .filter((s) => !s.isDlt)
+                .sort(
+                    (a, b) =>
+                        new Date(b.created_at).getTime() -
+                        new Date(a.created_at).getTime()
+                )[0];
+
+            const isScored =
+                latestScore &&
+                new Date(latestScore.created_at).toDateString() === today;
+
+            return {
+                ...user,
+                isScored: !!isScored,
+            };
+        });
+
+        return usersWithFlag;
     }
+
+    // async addScore(scores, staffId, submittedId) {
+    //     for (const score of scores) {
+    //         const latestScore = await prisma.score.findFirst({
+    //             where: {
+    //                 user_id: staffId,
+    //                 kpi_id: score.kpId,
+    //                 isDlt: false,
+    //             },
+    //             orderBy: {
+    //                 created_at: "desc", // get the most recent
+    //             },
+    //         });
+
+    //         let trend = "same";
+
+    //         if (latestScore) {
+    //             if (score.points > latestScore.points) trend = "up";
+    //             else if (score.points < latestScore.points) trend = "down";
+    //         }
+
+    //         return await prisma.score.create({
+    //             data: {
+    //                 kpi_id: score.kpiId,
+    //                 user_id: staffId,
+    //                 points: (score.score / 5) * score.weight,
+    //                 score:score.score,
+    //                 trend,
+    //                 evalutedby_user_id: submittedId,
+    //                 status: "approved",
+    //                 comment: score.comment,
+    //                 evalutedDate: null,
+    //             },
+    //         });
+
+    //     }
+    // }
+
     async addScore(scores, staffId, submittedId) {
+        const results = [];
         for (const score of scores) {
-            // Find the latest score for this user & KPI
             const latestScore = await prisma.score.findFirst({
-                where: {
-                    user_id: staffId,
-                    kpi_id: score.kpi_id,
-                    isDlt: false,
-                },
-                orderBy: {
-                    created_at: "desc", // get the most recent
-                },
+                where: { user_id: staffId, kpi_id: score.kpiId, isDlt: false },
+                orderBy: { created_at: "desc" },
             });
 
             let trend = "same";
-
             if (latestScore) {
-                if (score.points > latestScore.points) trend = "up";
-                else if (score.points < latestScore.points) trend = "down";
+                if (score.score > latestScore.score) trend = "up";
+                else if (score.score < latestScore.score) trend = "down";
             }
 
-            await prisma.score.create({
+            const res = await prisma.score.create({
                 data: {
-                    kpi_id: score.kpi_id,
+                    kpi_id: score.kpiId,
                     user_id: staffId,
-                    points: score.points,
+                    points: (score.score / 5) * score.weight,
+                    score: score.score,
                     trend,
                     evalutedby_user_id: submittedId,
                     status: "approved",
@@ -751,7 +817,10 @@ class DatabaseStorage {
                     evalutedDate: null,
                 },
             });
+            results.push(res);
         }
+
+        return results;
     }
 
     async getWalkouts(supervisorId) {
@@ -1006,7 +1075,7 @@ class DatabaseStorage {
             },
         });
     }
-    
+
     async active(id) {
         return await prisma.user.update({
             where: { id },
@@ -1035,8 +1104,6 @@ class DatabaseStorage {
         });
     }
     async updataMe(id, data) {
-        console.log(data, "sdfsdjfk;");
-
         return await prisma.user.update({
             where: { id },
             data: {
@@ -1397,6 +1464,168 @@ class DatabaseStorage {
             where: { id },
             data: data,
         });
+    }
+    async getScoreKpi() {
+        const kpis = await prisma.kPI.findMany({
+            where: { isDlt: false },
+        });
+
+        const today = new Date();
+
+        const filtered = kpis.filter((kpi) => {
+            const createdAt = new Date(kpi.created_at);
+
+            if (kpi.frequency === "daily") {
+                return true;
+            }
+
+            if (kpi.frequency === "weekly") {
+                const nextWeekDate = addDays(createdAt, 7);
+                return isSameDay(today, nextWeekDate);
+            }
+
+            if (kpi.frequency === "monthly") {
+                const nextMonthDate = addMonths(createdAt, 1);
+                return isSameDay(today, nextMonthDate);
+            }
+
+            return false;
+        });
+
+        return filtered;
+    }
+    async getEmployeeScore(id) {
+        const todayStart = startOfDay(new Date());
+        const todayEnd = endOfDay(new Date());
+
+        return await prisma.score.findMany({
+            where: {
+                user_id: id,
+                created_at: {
+                    gte: todayStart,
+                    lte: todayEnd,
+                },
+            },
+        });
+    }
+    async updateScoreEmployee(staffId, body) {
+        const results = [];
+        for (const score of body.scores) {
+            const latestScore = await prisma.score.findFirst({
+                where: { user_id: staffId, kpi_id: score.kpiId, isDlt: false },
+                orderBy: { created_at: "desc" },
+            });
+
+            if (latestScore) {
+                let trend = "same";
+                if (score.score > latestScore.score) trend = "up";
+                else if (score.score < latestScore.score) trend = "down";
+
+                const updated = await prisma.score.update({
+                    where: { id: latestScore.id },
+                    data: {
+                        score: score.score,
+                        points: (score.score / 5) * score.weight,
+                        comment: score.comment,
+                        trend,
+                        updated_at: new Date(),
+                    },
+                });
+
+                results.push(updated);
+            } else {
+                // if no previous score exists → create a new one
+                const created = await prisma.score.create({
+                    data: {
+                        kpi_id: score.kpiId,
+                        user_id: staffId,
+                        points: (score.score / 5) * score.weight,
+                        score: score.score,
+                        trend: "same",
+                        comment: score.comment,
+                        status: "approved",
+                        evalutedDate: null,
+                    },
+                });
+                results.push(created);
+            }
+        }
+
+        return results;
+    }
+    async getStaffReport(startDate, endDate){
+        try {
+            console.log("getStaffReport called with:", { startDate, endDate });
+            
+            // Parse dates if provided
+            let whereClause = {
+                isDlt: false,
+                role: {
+                    not: "Owner"
+                }
+            };
+
+            // Add date filtering if dates are provided
+            if (startDate && endDate) {
+                const start = new Date(startDate);
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999); // Include the entire end date
+                
+                whereClause.created_at = {
+                    gte: start,
+                    lte: end
+                };
+            }
+
+            const staffWithScores = await prisma.user.findMany({
+                where: whereClause,
+                include: {
+                    scores: {
+                        where: {
+                            isDlt: false,
+                            ...(startDate && endDate ? {
+                                created_at: {
+                                    gte: new Date(startDate),
+                                    lte: new Date(endDate)
+                                }
+                            } : {})
+                        }
+                    },
+                    floor: true
+                }
+            });
+
+            console.log("Found staff:", staffWithScores.length);
+            const staffReport = staffWithScores.map(staff => {
+                const totalScore = staff.scores.reduce((sum, score) => sum + score.points, 0);
+                const avgScore = staff.scores.length > 0 ? Math.round(totalScore / staff.scores.length) : 0;
+
+
+
+                const staffData = {
+                    staffId: staff.uniqueId,
+                    name: staff.name,
+                    mobile: staff.mobile,
+                    role: staff.role,
+                    section: staff.section,
+                    floor: staff.floor?.name || "N/A",
+                    avgScore,
+                   
+                };
+
+                console.log("Staff data:", staff.name, "Scores:", staff.scores.length);
+                return staffData;
+            });
+
+            // Sort by average score (descending)
+            staffReport.sort((a, b) => b.avgScore - a.avgScore);
+
+            console.log("getStaffReport returning:", staffReport.length, "staff members");
+            return staffReport;
+        } catch (error) {
+            console.error("Error in getStaffReport:", error);
+            throw error;
+        }
     }
 }
 

@@ -7,6 +7,155 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id                      String       @id @default(uuid())
+  name                    String
+  mobile                  String       @unique
+  uniqueId                String       @unique
+  pin_hash                String       @default("")
+  role                    role
+  section                 String?
+  active_flag             Boolean      @default(false)
+  created_at              DateTime     @default(now())
+  pin_expires_at          DateTime?
+  isDlt                   Boolean      @default(false)
+  floor_id                Int
+  attendanceAsStaff       Attendance[] @relation("AttendanceStaff")
+  attendanceAsSubmittedBy Attendance[] @relation("AttendanceSubmittedBy")
+  sales                   Sales[]
+  scored                  Score[]      @relation("ScoredByUser")
+  scores                  Score[]      @relation("ScoreUser")
+  tokens                  Token?
+  upload                  Upload[]
+  floor                   Floor        @relation(fields: [floor_id], references: [id])
+  walkOutsAsStaff         walkOut[]    @relation("WalkOutStaff")
+  walkOutsAsSubmitted     walkOut[]    @relation("WalkOutSubmittedBy")
+}
+
+model Floor {
+  id    Int     @id @default(autoincrement())
+  name  String  @unique
+  isDlt Boolean @default(false)
+  users User[]
+}
+
+model KPI {
+  id         String     @id @default(uuid())
+  name       String
+  frequency  Frequency?
+  weight     Float      @default(1)
+  max_points Float      @default(5)
+  target     Int
+  isDlt      Boolean    @default(false)
+  status     Boolean    @default(true)
+  created_at DateTime   @default(now())
+  updated_at DateTime   @updatedAt
+  scores     Score[]
+}
+
+model Sales {
+  id          String   @id @default(uuid())
+  year_code   String?
+  staffId     String
+  qtySold     Int?
+  salesAmount Decimal
+  prodValue   Decimal
+  profit      Decimal?
+  per         Decimal
+  weight      Float?
+  points      Decimal
+  createdAt   DateTime @default(now())
+  date        DateTime
+  updatedAt   DateTime @updatedAt
+  uploadId    Int
+  staff       User     @relation(fields: [staffId], references: [id])
+  upload      Upload   @relation("UploadSales", fields: [uploadId], references: [id])
+
+  @@unique([staffId, year_code])
+}
+
+model Attendance {
+  id             String   @id @default(uuid())
+  staffId        String
+  submittedBy_id String
+  date           DateTime
+  halfDays       String
+  fullDays       String
+  leaveCount     String
+  totalDays      String
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  staff          User     @relation("AttendanceStaff", fields: [staffId], references: [id])
+  submittedBy    User     @relation("AttendanceSubmittedBy", fields: [submittedBy_id], references: [id])
+}
+
+model Score {
+  id                 Int         @id @default(autoincrement())
+  user_id            String
+  kpi_id             String?
+  points             Float
+  score              Int?      @default(0)
+  evalutedby_user_id String
+  status             ScoreStatus
+  isDlt              Boolean     @default(false)
+  comment            String?
+  created_at         DateTime    @default(now())
+  updated_at         DateTime    @updatedAt
+  evalutedDate       DateTime?   
+  trend              String?
+  evalutedby         User        @relation("ScoredByUser", fields: [evalutedby_user_id], references: [id])
+  kpi                KPI?        @relation(fields: [kpi_id], references: [id])
+  user               User        @relation("ScoreUser", fields: [user_id], references: [id])
+}
+
+model Token {
+  id      Int    @id @default(autoincrement())
+  user_id String @unique
+  token   String @unique
+  user    User   @relation(fields: [user_id], references: [id])
+}
+
+model walkOut {
+  id             Int      @id @default(autoincrement())
+  description    String
+  isDlt          Boolean  @default(false)
+  priority       Priority
+  itemNameId     Int
+  type_id        Int
+  staffId        String
+  submittedBy_id String
+  created_at     DateTime @default(now())
+  updated_at     DateTime @updatedAt
+  itemName       itemName @relation(fields: [itemNameId], references: [id])
+  staff          User     @relation("WalkOutStaff", fields: [staffId], references: [id])
+  submittedBy    User     @relation("WalkOutSubmittedBy", fields: [submittedBy_id], references: [id])
+  type           itemType @relation(fields: [type_id], references: [id])
+}
+
+model itemName {
+  id       Int       @id @default(autoincrement())
+  name     String    @unique
+  walkouts walkOut[]
+}
+
+model itemType {
+  id       Int       @id @default(autoincrement())
+  name     String    @unique
+  walkouts walkOut[]
+}
+
+model Upload {
+  id            Int      @id @default(autoincrement())
+  originalname  String
+  mimetype      String
+  path          String
+  size          Int
+  uploadedBy_id String?
+  uploadedAt    DateTime @default(now())
+  sales         Sales[]  @relation("UploadSales")
+  uploaded_by   User?    @relation(fields: [uploadedBy_id], references: [id])
+}
+
 enum role {
   Owner
   FloorSupervisor @map("Floor-Supervisor")
@@ -26,13 +175,14 @@ enum Frequency {
   weekly
   monthly
 }
+
 enum ScoreStatus {
   pending
   approved
   rejected
 }
 
-enum Type{
+enum Type {
   half
   full
   leavem
@@ -42,170 +192,9 @@ enum SaleType {
   TRANSACTION
   SUMMARY
 }
-enum Priority{
-  Low 
+
+enum Priority {
+  Low
   Medium
   High
-}
-
-model User {
-  id          String   @id @default(uuid())
-  name        String
-  mobile      String   @unique
-  uniqueId    String   @unique 
-  pin_hash    String   @default("")
-  role        role
-  section     String?
-  active_flag Boolean  @default(false)
-  created_at  DateTime @default(now())
-  pin_expires_at DateTime?
-  isDlt       Boolean  @default(false)
-  floor_id    Int
-
-  floor       Floor    @relation(fields: [floor_id], references: [id])
-  tokens      Token[]
-
-  scores      Score[]  @relation("ScoreUser")
-  scored      Score[]  @relation("ScoredByUser")
-  walkOutsAsStaff     walkOut[] @relation("WalkOutStaff")
-  walkOutsAsSubmitted walkOut[] @relation("WalkOutSubmittedBy")
-  upload       Upload[]
-  sales        Sales[]
-  attendanceAsStaff       Attendance[] @relation("AttendanceStaff")
-  attendanceAsSubmittedBy Attendance[] @relation("AttendanceSubmittedBy")
-}
-
-model Floor {
-  id    Int    @id @default(autoincrement())
-  name  String @unique
-  users User[]
-  isDlt Boolean @default(false)
-}
-
-model KPI {
-  id          String @id @default(uuid())
-  name        String
-  frequency   Frequency?
-  weight      Float
-  max_points  Float @default(5)
-  target      Int
-  scores      Score[]
-  isDlt       Boolean @default(false)
-  status      Boolean  @default(true)
-  created_at  DateTime @default(now())
-  updated_at  DateTime @updatedAt
-}
-
-model Sales {
-  id          String    @id @default(uuid())
-  year_code   String?
-  staffId     String
-  staff       User     @relation(fields: [staffId], references: [id])
-
-  qtySold     Int?
-  salesAmount Decimal
-  prodValue   Decimal
-  profit      Decimal?
-  per         Decimal
-  weight      Float?
-  points      Decimal
-  createdAt   DateTime  @default(now())
-  date        DateTime
-  updatedAt   DateTime  @updatedAt
-
-  uploadId    Int
-  upload      Upload @relation("UploadSales", fields: [uploadId], references: [id])
-
-  @@unique([staffId, year_code])
-
-}
-
-model Attendance {
-  id             String   @id @default(uuid())
-  staffId        String
-  staff          User     @relation("AttendanceStaff", fields: [staffId], references: [id])
-
-  submittedBy_id String
-  submittedBy    User     @relation("AttendanceSubmittedBy", fields: [submittedBy_id], references: [id])
-
-  date           DateTime
-  halfDays       String
-  fullDays       String
-  leaveCount     String
-  totalDays      String
-
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-}
-
-model Score {
-  id                 Int      @id @default(autoincrement())
-  user_id            String
-  kpi_id             String?
-  points             Float
-  evalutedby_user_id String
-  status             ScoreStatus
-  isDlt              Boolean  @default(false)
-  comment            String?
-  created_at         DateTime @default(now())
-  updated_at         DateTime @updatedAt
-  evalutedDate       DateTime?
-  trend              String?  
-
-
-  user       User @relation("ScoreUser", fields: [user_id], references: [id])
-  kpi        KPI?  @relation(fields: [kpi_id], references: [id])
-  evalutedby User @relation("ScoredByUser", fields: [evalutedby_user_id], references: [id])
-}
-
-model Token {
-  id      Int    @id @default(autoincrement())
-  user_id String @unique
-  token   String @unique
-  user    User   @relation(fields: [user_id], references: [id])
-}
-model walkOut {
-  id             Int           @id @default(autoincrement())
-  description         String
-  isDlt          Boolean       @default(false)
-  priority       Priority
-
-  itemNameId  Int
-  itemName    itemName      @relation(fields: [itemNameId], references: [id]) 
-
-  type_id        Int
-  type           itemType      @relation(fields: [type_id], references: [id])
-
-  staffId        String
-  staff          User          @relation("WalkOutStaff", fields: [staffId], references: [id])
-
-  submittedBy_id String
-  submittedBy    User          @relation("WalkOutSubmittedBy", fields: [submittedBy_id], references: [id])
-
-  created_at     DateTime      @default(now())
-  updated_at     DateTime      @updatedAt
-}
-
-model itemName {
-  id        Int        @id @default(autoincrement())
-  name      String     @unique
-  walkouts  walkOut[]
-}
-
-model itemType {
-  id        Int        @id @default(autoincrement())
-  name      String     @unique
-  walkouts  walkOut[]
-}
-
-model Upload {
-  id            Int      @id @default(autoincrement())   
-  originalname  String
-  mimetype      String
-  path          String
-  size          Int
-  uploadedBy_id String?
-  uploaded_by   User?     @relation(fields: [uploadedBy_id], references: [id])
-  uploadedAt    DateTime  @default(now())
-  sales         Sales[]   @relation("UploadSales")
 }
