@@ -74,8 +74,14 @@ staffRouter.post("/useredit", verifyTokens, async (req, res) => {
 });
 staffRouter.post("/logout", verifyTokens, async (req, res) => {
     try {
+        // Clear all sessions for this user
         await storage.logoutSupervisor(req.user.id);
-        res.status(200).json({ success: dmmfToRuntimeDataModel });
+        
+        // Clear cookies
+        res.cookie("accesstoken", "", { maxAge: 0, httpOnly: true, secure: true, sameSite: 'none' });
+        res.cookie("refreshtoken", "", { maxAge: 0, httpOnly: true, secure: true, sameSite: 'none' });
+        
+        res.status(200).json({ success: true, message: "Logged out successfully" });
     } catch (error) {
         console.log(error);
         res.status(500).json({

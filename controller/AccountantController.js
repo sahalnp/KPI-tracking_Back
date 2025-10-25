@@ -4,6 +4,143 @@ import fs from "fs";
 import csv from "csv-parser";
 import XLSX from "xlsx";
 
+
+export const getFloorData = async (req, res) => {
+    try {
+        const { month, year } = req.query;
+        const accountantId = req.user.id;
+        
+        const floorPerformance = await storage.getAccountantFloorPerformance(accountantId, month, year);
+        const floorAttendance = await storage.getAccountantFloorAttendance(month, year);
+        
+        res.status(200).json({
+            success: true,
+            floorPerformance,
+            floorAttendance
+        });
+    } catch (error) {
+        console.error("Error fetching floor data:", error);
+        res.status(500).json({ success: false, error: "Failed to fetch floor data" });
+    }
+};
+
+export const getSalesGraph = async (req, res) => {
+    try {
+        const { month, year } = req.query;
+        const accountantId = req.user.id;
+
+        // Get sales data for last 4 months
+        const salesGraph = await storage.getAccountantSalesGraph(accountantId, month, year);
+        
+        res.status(200).json({
+            success: true,
+            salesGraph
+        });
+    } catch (error) {
+        console.error("Error fetching sales graph:", error);
+        res.status(500).json({ success: false, error: "Failed to fetch sales graph" });
+    }
+};
+
+export const getStaffGraph = async (req, res) => {
+    console.log("sfkljsdkfdsiorweuoriwurioweuroirweurioiwerio777777777777777");
+    
+    try {
+        const { month, year } = req.query;
+        const accountantId = req.user.id;
+        console.log("sdjfklsflksfjklsflkkskfdsjkf",month,year);
+        
+
+        // Get staff data for last 4 months
+        const staffGraph = await storage.getAccountantStaffGraph(accountantId, month, year);
+        
+        res.status(200).json({
+            success: true,
+            staffGraph
+        });
+    } catch (error) {
+        console.error("Error fetching staff graph:", error);
+        res.status(500).json({ success: false, error: "Failed to fetch staff graph" });
+    }
+};
+
+export const getFloorAttendance = async (req, res) => {
+    try {
+        const { month, year } = req.query;
+        const accountantId = req.user.id;
+
+        // Get floor attendance data
+        const floorAttendance = await storage.getAccountantFloorAttendance(month, year);
+        
+        res.status(200).json({
+            success: true,
+            floorAttendance
+        });
+    } catch (error) {
+        console.error("Error fetching floor attendance:", error);
+        res.status(500).json({ success: false, error: "Failed to fetch floor attendance" });
+    }
+};
+
+export const getFloors = async (req, res) => {
+    try {
+        const floors = await storage.getFloors();
+        console.log("Controller - Floors:", floors);
+        
+        res.status(200).json({
+            success: true,
+            floors
+        });
+    } catch (error) {
+        console.error("Error fetching floors:", error);
+        res.status(500).json({ success: false, error: "Failed to fetch floors" });
+    }
+};
+
+export const downloadFile = async (req, res) => {
+    try {
+        const { fileId } = req.params;
+        const accountantId = req.user.id;
+
+        // Get the file info from database
+        const file = await storage.getUploadById(fileId);
+        
+        if (!file) {
+            return res.status(404).json({ success: false, error: "File not found" });
+        }
+
+        // Check if file belongs to this accountant
+        if (file.uploadedBy_id !== accountantId) {
+            return res.status(403).json({ success: false, error: "Access denied" });
+        }
+
+        // Construct file path
+        const filePath = path.join(process.cwd(), "public", "uploads", file.path);
+
+        // Check if file exists
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({ success: false, error: "File not found on disk" });
+        }
+
+        // Set appropriate headers for download
+        res.setHeader('Content-Disposition', `attachment; filename="${file.originalname}"`);
+        res.setHeader('Content-Type', 'application/octet-stream');
+
+        // Stream the file
+        const fileStream = fs.createReadStream(filePath);
+        fileStream.pipe(res);
+
+        fileStream.on('error', (error) => {
+            console.error('Error streaming file:', error);
+            res.status(500).json({ success: false, error: "Error downloading file" });
+        });
+
+    } catch (error) {
+        console.error("Download error:", error);
+        res.status(500).json({ success: false, error: "Failed to download file" });
+    }
+};
+
 export const uploadData = async (req, res) => {
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
@@ -41,23 +178,39 @@ export const uploadData = async (req, res) => {
         for (const row of rows) {
             const nameCell = row["CENTURY FASHION CITY"];
 
-            // Staff row
+            // Staff row - matches format like "0 [ANY NAME] [ID]"
             if (
                 typeof nameCell === "string" &&
                 nameCell.match(/\d+\s+.+\[\d+\]/)
             ) {
-                const match = nameCell.match(/(.+)\[(\d+)\]/);
-                const staffId = await storage.findUser(match[2], 10);
+                // Extract name and ID from format "0 [ANY NAME] [ID]"
+                const match = nameCell.match(/\d+\s+(.+)\[(\d+)\]/);
+                if (match) {
+                    const staffName = match[1].trim(); // Any staff name
+                    const staffId = match[2]; // Any staff ID
+                    
+                    console.log(`Processing staff: "${staffName}" with ID: ${staffId}`);
+                    
+                    let staffUser = await storage.findUser(staffId);
 
-                currentStaff = {
-                    staffName: match[1].trim(),
-                    staffCode: parseInt(match[2], 10),
-                    sales: [],
-                    staffId,
-                    upload,
-                    uploadId: upload.id,
-                };
-                formatted.push(currentStaff);
+                    // Only process existing staff, skip if staff doesn't exist
+                    if (!staffUser) {
+                        console.log(`Staff with ID ${staffId} not found, skipping...`);
+                        continue;
+                    } else {
+                        console.log(`Found existing staff: "${staffName}" with ID: ${staffId}`);
+                    }
+
+                    currentStaff = {
+                        staffName: staffName,
+                        staffCode: parseInt(staffId, 10),
+                        sales: [],
+                        staffId: staffUser,
+                        upload,
+                        uploadId: upload.id,
+                    };
+                    formatted.push(currentStaff);
+                }
             }
             // Sales row
             else if (currentStaff && nameCell && /^[A-Z]+$/.test(nameCell)) {
@@ -160,8 +313,14 @@ export const updatePin = async (req, res) => {
 };
 export const logoutAccountant = async (req, res) => {
     try {
+        // Clear all sessions for this user
         await storage.logoutSupervisor(req.user.id);
-        res.status(200).json({ success: true });
+        
+        // Clear cookies
+        res.cookie("accesstoken", "", { maxAge: 0, httpOnly: true, secure: true, sameSite: 'none' });
+        res.cookie("refreshtoken", "", { maxAge: 0, httpOnly: true, secure: true, sameSite: 'none' });
+        
+        res.status(200).json({ success: true, message: "Logged out successfully" });
     } catch (error) {
         console.log(error);
         res.status(500).json({
@@ -224,8 +383,9 @@ export const addAttendence = async (req, res) => {
 };
 export const getDetails=async(req,res)=>{
     try {
-        const {month,year}=req.query
-        const value=await storage.AccountantDetails(req.user.id,month,year)
+        const {month,year}=req.query;
+
+        const value=await storage.getAccountantDetails(req.user.id,month,year)
         console.log(value,"sdfjdslkfjlk");
         
         res.status(200).json({ success: true,value });

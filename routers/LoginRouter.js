@@ -41,6 +41,12 @@ loginRouter.post("/auth/login", async (req, res) => {
 
     await storage.active(user.id);
 
+    // Get device information
+    const deviceInfo = req.headers['user-agent'] || 'Unknown Device';
+    const ipAddress = req.ip || req.connection.remoteAddress || req.socket.remoteAddress || 
+                     (req.connection.socket ? req.connection.socket.remoteAddress : null) || 'Unknown IP';
+    const userAgent = req.headers['user-agent'] || 'Unknown User Agent';
+
     const findToken = await storage.getToken(mobile);
 
     const accessToken = generateAccessToken(user);
@@ -49,9 +55,9 @@ loginRouter.post("/auth/login", async (req, res) => {
     setCookie(res, accessToken, refreshToken);
 
     if (findToken) {
-      await storage.replaceToken(mobile, refreshToken);
+      await storage.replaceToken(mobile, refreshToken, deviceInfo, ipAddress, userAgent);
     } else {
-      await storage.createToken(mobile, refreshToken);
+      await storage.createToken(mobile, refreshToken, deviceInfo, ipAddress, userAgent);
     }
 
     return res.status(200).json({

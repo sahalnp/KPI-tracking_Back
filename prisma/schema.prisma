@@ -6,7 +6,6 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
-
 model User {
   id                      String       @id @default(uuid())
   name                    String
@@ -19,38 +18,47 @@ model User {
   created_at              DateTime     @default(now())
   pin_expires_at          DateTime?
   isDlt                   Boolean      @default(false)
-  floor_id                Int
+  floor_id                Int?
+  shopId                  String?                    // 🏪 new field
+  shop                    Shop?       @relation(fields: [shopId], references: [id])
+
   attendanceAsStaff       Attendance[] @relation("AttendanceStaff")
   attendanceAsSubmittedBy Attendance[] @relation("AttendanceSubmittedBy")
   sales                   Sales[]
   scored                  Score[]      @relation("ScoredByUser")
   scores                  Score[]      @relation("ScoreUser")
-  tokens                  Token?
-  upload                  Upload[]
-  floor                   Floor        @relation(fields: [floor_id], references: [id])
+  tokens                  Token[]
+  upload                  Upload[]           
+  floor                   Floor?       @relation(fields: [floor_id], references: [id])
   walkOutsAsStaff         walkOut[]    @relation("WalkOutStaff")
   walkOutsAsSubmitted     walkOut[]    @relation("WalkOutSubmittedBy")
+  shopOwned               Shop?        @relation("ShopOwner")
 }
 
 model Floor {
-  id    Int     @id @default(autoincrement())
-  name  String  @unique
-  isDlt Boolean @default(false)
-  users User[]
+  id       Int     @id @default(autoincrement())
+  name     String
+  isDlt    Boolean @default(false)
+  shopId   String?
+  shop     Shop?   @relation(fields: [shopId], references: [id])
+  users    User[]
 }
+
 
 model KPI {
   id         String     @id @default(uuid())
   name       String
   frequency  Frequency?
   weight     Float      @default(1)
-  max_points Float      @default(5)
-  target     Int
+  max_points Float      @default(5)       
   isDlt      Boolean    @default(false)
   status     Boolean    @default(true)
   created_at DateTime   @default(now())
   updated_at DateTime   @updatedAt
   scores     Score[]
+  shopId String?
+shop   Shop? @relation(fields: [shopId], references: [id])
+
 }
 
 model Sales {
@@ -68,11 +76,15 @@ model Sales {
   date        DateTime
   updatedAt   DateTime @updatedAt
   uploadId    Int
+  shopId      String?
+  shop        Shop?    @relation(fields: [shopId], references: [id])
+
   staff       User     @relation(fields: [staffId], references: [id])
   upload      Upload   @relation("UploadSales", fields: [uploadId], references: [id])
 
   @@unique([staffId, year_code])
 }
+
 
 model Attendance {
   id             String   @id @default(uuid())
@@ -87,7 +99,31 @@ model Attendance {
   updatedAt      DateTime @updatedAt
   staff          User     @relation("AttendanceStaff", fields: [staffId], references: [id])
   submittedBy    User     @relation("AttendanceSubmittedBy", fields: [submittedBy_id], references: [id])
+  shopId    String?
+shop      Shop?   @relation(fields: [shopId], references: [id])
+
 }
+model Shop {
+  id          String    @id @default(uuid())
+  address     String?
+  contact     String?
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @updatedAt
+
+
+  owner       User?     @relation("ShopOwner", fields: [ownerId], references: [id])
+  ownerId     String?   @unique
+  floors      Floor[]
+  users       User[]
+  sales       Sales[]
+  attendances Attendance[]
+  scores      Score[]
+  tokens      Token[]
+  walkouts    walkOut[]
+  uploads     Upload[]
+  kpis        KPI[]
+}
+
 
 model Score {
   id                 Int         @id @default(autoincrement())
@@ -106,13 +142,28 @@ model Score {
   evalutedby         User        @relation("ScoredByUser", fields: [evalutedby_user_id], references: [id])
   kpi                KPI?        @relation(fields: [kpi_id], references: [id])
   user               User        @relation("ScoreUser", fields: [user_id], references: [id])
+  shopId    String?
+shop      Shop?   @relation(fields: [shopId], references: [id])
+
 }
 
 model Token {
-  id      Int    @id @default(autoincrement())
-  user_id String @unique
-  token   String @unique
-  user    User   @relation(fields: [user_id], references: [id])
+  id          Int      @id @default(autoincrement())
+  user_id     String
+  token       String   @unique
+  expiry      DateTime?
+  device_info String?  // Store device/browser info
+  ip_address  String?  // Store IP address
+  user_agent  String?  // Store user agent
+  is_active   Boolean  @default(true)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @updatedAt
+  user        User     @relation(fields: [user_id], references: [id])
+  shopId    String?
+shop      Shop?   @relation(fields: [shopId], references: [id])
+
+
+  @@index([user_id])
 }
 
 model walkOut {
@@ -130,6 +181,9 @@ model walkOut {
   staff          User     @relation("WalkOutStaff", fields: [staffId], references: [id])
   submittedBy    User     @relation("WalkOutSubmittedBy", fields: [submittedBy_id], references: [id])
   type           itemType @relation(fields: [type_id], references: [id])
+  shopId    String?
+shop      Shop?   @relation(fields: [shopId], references: [id])
+
 }
 
 model itemName {
@@ -154,6 +208,9 @@ model Upload {
   uploadedAt    DateTime @default(now())
   sales         Sales[]  @relation("UploadSales")
   uploaded_by   User?    @relation(fields: [uploadedBy_id], references: [id])
+  shopId    String?
+shop      Shop?   @relation(fields: [shopId], references: [id])
+
 }
 
 enum role {

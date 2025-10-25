@@ -14,9 +14,10 @@ import {
     startOfDay,
     endOfDay,
 } from "date-fns";
+import { hashPassword } from "./Password.js";
 class DatabaseStorage {
     async getKPIs() {
-        const kpis = await prisma.kPI.findMany({
+        const kpis = await prisma.KPI.findMany({
             where: { isDlt: false },
             orderBy: {
                 created_at: "desc",
@@ -56,7 +57,7 @@ class DatabaseStorage {
     }
 
     async addKpi(value) {
-        return (await prisma.kPI.create({ data: value })) || null;
+        return (await prisma.KPI.create({ data: value })) || null;
     }
     async addUser(value) {
         return (
@@ -70,20 +71,13 @@ class DatabaseStorage {
     }
     async dltKpi(id) {
         return (
-            (await prisma.kPI.update({
+            (await prisma.KPI.update({
                 where: { id: Number(id) },
                 data: { isDlt: true, status: false },
             })) || null
         );
     }
-    async toggleKpi(id, status) {
-        return (
-            (await prisma.kPI.update({
-                where: { id },
-                data: { status },
-            })) || null
-        );
-    }
+    
     async getDeletedUsersCount() {
         return await prisma.user.count({
             where: {
@@ -151,7 +145,7 @@ class DatabaseStorage {
     }
 
     async updateKpi(kpi) {
-        return await prisma.kPI.update({
+        return await prisma.KPI.update({
             where: { id: kpi.id },
             data: { ...kpi, id: undefined },
         });
@@ -239,7 +233,6 @@ class DatabaseStorage {
             last4Weeks.push({
                 week: weekLabel,
                 score: totalValue,
-                target: totalTarget,
                 percentage: totalTarget
                     ? Math.round((totalValue / totalTarget) * 100)
                     : 0,
@@ -254,36 +247,39 @@ class DatabaseStorage {
     }
 
     async getDetails() {
-        const userCount = await prisma.user.count({
-            where: {
-                isDlt: false,
-                role: { not: "Owner" },
-            },
-        });
-        const kpiCount = await prisma.kPI.count({
-            where: { isDlt: false },
-        });
-        const floorCount = await prisma.floor.count({
-            where: { isDlt: false },
-        });
-        const recentKPIs = await prisma.kPI.findMany({
-            where: { isDlt: false },
-            orderBy: { created_at: "desc" },
-            take: 5,
-        });
-        const recentUsers = await prisma.user.findMany({
-            where: { isDlt: false, role: { not: "Owner" } },
-            orderBy: { created_at: "desc" },
-            take: 5,
-        });
+        try {
+            const userCount = await prisma.user.count({
+                where: {
+                    isDlt: false,
+                    role: { not: "Owner" },
+                },
+            });
+            const kpiCount = await prisma.KPI.count({
+                where: { isDlt: false },
+            });
+            const floorCount = await prisma.floor.count({
+                where: { isDlt: false },
+            });
+            const walkoutCount = await prisma.walkOut.count({
+                where: { isDlt: false },
+            });
 
-        return {
-            totalUsers: userCount,
-            totalKPIs: kpiCount,
-            totalFloors: floorCount,
-            recentKPIs,
-            recentUsers,
-        };
+            return {
+                totalUsers: userCount,
+                totalKPIs: kpiCount,
+                totalFloors: floorCount,
+                totalWalkouts: walkoutCount,
+            };
+        } catch (error) {
+            console.error("Error in getDetails:", error);
+            // Return default values if database connection fails
+            return {
+                totalUsers: 0,
+                totalKPIs: 0,
+                totalFloors: 0,
+                totalWalkouts: 0,
+            };
+        }
     }
     async changePin(mobile, newPin) {
         const now = new Date();
@@ -308,32 +304,109 @@ class DatabaseStorage {
         });
     }
 
-    async createToken(mobile, refreshToken) {
+    async createToken(
+        mobile,
+        refreshToken,
+        deviceInfo = null,
+        ipAddress = null,
+        userAgent = null
+    ) {
         const user = await this.getUser(mobile);
+        const expiryDate = new Date();
+        expiryDate.setDate(expiryDate.getDate() + 7);
         if (!user) throw new Error("User not found");
+
+        // First, deactivate all existing tokens for this user (single session)
+        await prisma.token.updateMany({
+            where: {
+                user_id: user.id,
+                is_active: true,
+            },
+            data: { is_active: false },
+        });
+
+        // Create new token
         await prisma.token.create({
             data: {
                 user_id: user.id,
                 token: refreshToken,
+                expiry: expiryDate,
+                device_info: deviceInfo,
+                ip_address: ipAddress,
+                user_agent: userAgent,
+                is_active: true,
             },
         });
     }
-    async replaceToken(mobile, newRefreshToken) {
+    async replaceToken(
+        mobile,
+        newRefreshToken,
+        deviceInfo = null,
+        ipAddress = null,
+        userAgent = null
+    ) {
         const user = await this.getUser(mobile);
         if (!user) throw new Error("User not found");
+
+        // Deactivate all existing tokens for this user
         await prisma.token.updateMany({
-            where: { user_id: user.id },
-            data: { token: newRefreshToken },
+            where: {
+                user_id: user.id,
+                is_active: true,
+            },
+            data: { is_active: false },
+        });
+
+        // Create new token
+        const expiryDate = new Date();
+        expiryDate.setDate(expiryDate.getDate() + 7);
+
+        await prisma.token.create({
+            data: {
+                user_id: user.id,
+                token: newRefreshToken,
+                expiry: expiryDate,
+                device_info: deviceInfo,
+                ip_address: ipAddress,
+                user_agent: userAgent,
+                is_active: true,
+            },
         });
     }
     async getToken(mobile) {
         const user = await this.getUser(mobile);
         if (!user) throw new Error("User not found");
         return (
-            (await prisma.token.findUnique({
-                where: { user_id: user.id },
+            (await prisma.token.findFirst({
+                where: {
+                    user_id: user.id,
+                    is_active: true,
+                },
+                orderBy: { created_at: "desc" },
             })) || null
         );
+    }
+
+    // Logout user from all sessions
+    async logoutAllSessions(userId) {
+        await prisma.token.updateMany({
+            where: {
+                user_id: userId,
+                is_active: true,
+            },
+            data: { is_active: false },
+        });
+    }
+
+    // Logout specific session by token
+    async logoutSession(token) {
+        await prisma.token.updateMany({
+            where: {
+                token: token,
+                is_active: true,
+            },
+            data: { is_active: false },
+        });
     }
     async getStaffDetails(staffId) {
         const avgScore = await prisma.score.aggregate({
@@ -486,24 +559,34 @@ class DatabaseStorage {
             let totalFull = 0;
             let totalHalf = 0;
             let totalLeave = 0;
-            let totalDays = 0;
 
             for (const a of attendances) {
                 totalFull += parseFloat(a.fullDays || 0);
                 totalHalf += parseFloat(a.halfDays || 0);
                 totalLeave += parseFloat(a.leaveCount || 0);
-                totalDays += parseFloat(a.totalDays || 0);
             }
 
             // Calculate present equivalent (full + half/2)
             const presentCount = totalFull + totalHalf * 0.5;
+
+            // Get the current month's total days
+            const now = new Date();
+            const totalDaysInMonth = new Date(
+                now.getFullYear(),
+                now.getMonth() + 1,
+                0
+            ).getDate();
+
+            // Use correct formula: (Total Days by user / Total days in month) × 100
             const percentage =
-                totalDays > 0 ? (presentCount / totalDays) * 100 : 0;
+                totalDaysInMonth > 0
+                    ? (presentCount / totalDaysInMonth) * 100
+                    : 0;
 
             return {
                 present: +presentCount.toFixed(1),
                 leave: +totalLeave.toFixed(1),
-                totalDays: +totalDays.toFixed(1),
+                totalDays: +totalDaysInMonth.toFixed(1),
                 percentage: +percentage.toFixed(1),
             };
         }
@@ -703,14 +786,418 @@ class DatabaseStorage {
         return pieData;
     }
     async getStaff(id) {
-        const supervisor = await prisma.user.findUnique({ where: { id } });
-        return await prisma.user.findMany({
-            where: {
-                role: "Staff",
-                floor_id: supervisor?.floor_id,
-                isDlt: false,
-            },
-        });
+        try {
+            const supervisor = await prisma.user.findUnique({
+                where: { id },
+                include: { floor: true },
+            });
+
+            if (!supervisor?.floor) {
+                return [];
+            }
+
+            const staff = await prisma.user.findMany({
+                where: {
+                    role: "Staff",
+                    floor_id: supervisor.floor.id,
+                    isDlt: false,
+                },
+                include: {
+                    floor: true,
+                    scores: {
+                        where: {
+                            created_at: {
+                                gte: new Date(new Date().setHours(0, 0, 0, 0)),
+                            },
+                        },
+                        orderBy: {
+                            created_at: "desc",
+                        },
+                        take: 1,
+                    },
+                },
+            });
+
+            // Transform data to match expected format
+            return staff.map((user) => ({
+                id: user.id,
+                name: user.name,
+                mobile: user.mobile,
+                role: user.role,
+                section: user.section,
+                floor: user.floor,
+                isScored: user.scores.length > 0,
+                score: user.scores.length > 0 ? user.scores[0].score : 0,
+                lastScoreDate:
+                    user.scores.length > 0 ? user.scores[0].created_at : null,
+            }));
+        } catch (error) {
+            console.error("Error fetching staff:", error);
+            throw error;
+        }
+    }
+
+    async checkIdExists(uniqueId) {
+        try {
+            const user = await prisma.user.findUnique({
+                where: { uniqueId },
+                select: { id: true },
+            });
+            return !!user;
+        } catch (error) {
+            console.error("Error checking ID existence:", error);
+            return false;
+        }
+    }
+
+    async getAccountantDetails( month, year) {
+        try {
+            const startDate = new Date(year, month - 1, 1);
+            const endDate = new Date(year, month, 1);
+
+            // Get basic statistics
+            const activeStaff = await prisma.user.count({
+                where: { role: "Staff", active_flag: true, isDlt: false },
+            });
+
+            const attendanceRecords = await prisma.attendance.findMany({
+                where: { createdAt: { gte: startDate, lt: endDate } },
+                include: { staff: true },
+            });
+            // Calculate total days in the month
+            const totalDaysInMonth = new Date(year, month, 0).getDate();
+
+            const staffAttendanceMap = {};
+            attendanceRecords.forEach((record) => {
+                const userId = record.staffId;
+                if (!staffAttendanceMap[userId])
+                    staffAttendanceMap[userId] = {
+                        present: 0,
+                        name: record.staff.name,
+                    };
+
+                // Parse attendance data from the record fields
+                const fullDays = parseInt(record.fullDays) || 0;
+                const halfDays = parseInt(record.halfDays) || 0;
+
+                // Calculate total days present (full days + half days)
+                staffAttendanceMap[userId].present += fullDays + halfDays * 0.5;
+            });
+
+            // 4️⃣ Determine top attendance staff
+            let topAttendanceStaff = { name: "N/A", attendance: 0 };
+            Object.values(staffAttendanceMap).forEach((staff) => {
+                // Use the correct formula: (Total Days by user / Total days in month) × 100
+                const percent =
+                    totalDaysInMonth > 0
+                        ? (staff.present / totalDaysInMonth) * 100
+                        : 0;
+                if (percent > topAttendanceStaff.attendance) {
+                    topAttendanceStaff = {
+                        name: staff.name,
+                        attendance: Math.round(percent),
+                    };
+                }
+            });
+            const salesRecords = await prisma.sales.findMany({
+                where: { date: { gte: startDate, lt: endDate } },
+                include: { staff: { include: { floor: true } } },
+            });
+
+            console.log(
+                `Found ${salesRecords.length} sales records for ${month}/${year}`
+            );
+
+            const floorSalesMap = {};
+            salesRecords.forEach((record) => {
+                const floorName = record.staff?.floor?.name || "Unknown";
+                // Use salesAmount as the primary field, but also log prodValue for debugging
+                const salesAmount = parseFloat(record.salesAmount) || 0;
+                const prodValue = parseFloat(record.prodValue) || 0;
+
+                if (!floorSalesMap[floorName]) {
+                    floorSalesMap[floorName] = 0;
+                }
+                floorSalesMap[floorName] += salesAmount;
+
+                console.log(
+                    `Staff: ${
+                        record.staff?.name || "Unknown"
+                    }, Floor: ${floorName}, SalesAmount: ${salesAmount}, ProdValue: ${prodValue}`
+                );
+            });
+
+            console.log("Floor sales map:", floorSalesMap);
+
+            let topFloor = { floor: "N/A", sales: 0 };
+            Object.entries(floorSalesMap).forEach(([floor, sales]) => {
+                if (sales > topFloor.sales) {
+                    topFloor = { floor, sales };
+                }
+            });
+
+            console.log("Top floor:", topFloor);
+
+            // 6️⃣ Get top selling staff
+            const topStaff = await prisma.sales.findFirst({
+                where: { date: { gte: startDate, lt: endDate } },
+                include: { staff: true },
+                orderBy: { salesAmount: "desc" },
+            });
+
+            return {
+                activeStaff,
+                attendanceCount: attendanceRecords.length,
+                topAttendanceStaff,
+                topSaleFloor: topFloor,
+                topStaffName: topStaff?.staff?.name || "N/A",
+            };
+        } catch (error) {
+            console.error("Error fetching accountant details:", error);
+            return {
+                activeStaff: 0,
+                attendanceCount: 0,
+                topAttendanceStaff: { name: "N/A", attendance: 0 },
+                topSaleFloor: { name: "N/A", sales: 0 },
+                topStaffName: "N/A",
+            };
+        }
+    }
+
+    async getAccountantFloorPerformance(accountantId, month, year) {
+        try {
+            const currentMonth = parseInt(month);
+            const currentYear = parseInt(year);
+
+            const floors = await prisma.floor.findMany({
+                where: { isDlt: false },
+                include: {
+                    users: {
+                        include: {
+                            sales: {
+                                where: {
+                                    date: {
+                                        gte: new Date(
+                                            currentYear,
+                                            currentMonth - 1,
+                                            1
+                                        ),
+                                        lt: new Date(
+                                            currentYear,
+                                            currentMonth,
+                                            1
+                                        ),
+                                    },
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+
+            return floors.map((floor) => {
+                const totalSales = floor.users.reduce((sum, user) => {
+                    return (
+                        sum +
+                        user.sales.reduce(
+                            (userSum, sale) =>
+                                userSum + parseFloat(sale.salesAmount || 0),
+                            0
+                        )
+                    );
+                }, 0);
+
+                // Show only 10% of actual sales for graph display
+                const displaySales = totalSales * 0.1;
+
+                return {
+                    floor: floor.name,
+                    sales: displaySales,
+                };
+            });
+        } catch (error) {
+            console.error("Error fetching floor performance:", error);
+            // Return empty array, frontend will handle getting floors
+            return [];
+        }
+    }
+
+    async getAccountantFloorAttendance(month, year) {
+        try {
+            const currentMonth = parseInt(month);
+            const currentYear = parseInt(year);
+            const daysInMonth = new Date(
+                currentYear,
+                currentMonth,
+                0
+            ).getDate();
+
+            const floors = await prisma.floor.findMany({
+                where: { isDlt: false },
+            });
+
+            const floorAttendanceData = [];
+
+            for (const floor of floors) {
+                const staffInFloor = await prisma.user.findMany({
+                    where: {
+                        floor_id: floor.id,
+                        role: "Staff",
+                        isDlt: false,
+                        active_flag: true, // ✅ Only active staff
+                    },
+                    select: { id: true },
+                });
+
+                if (staffInFloor.length === 0) {
+                    floorAttendanceData.push({
+                        floor: floor.name,
+                        attendance: 0,
+                    });
+                    continue;
+                }
+
+                let totalFloorAttendancePercentage = 0;
+
+                for (const staffMember of staffInFloor) {
+                    // Get attendance record for this month
+                    const attendanceRecord = await prisma.attendance.findFirst({
+                        where: {
+                            staffId: staffMember.id,
+                            date: {
+                                gte: new Date(currentYear, currentMonth - 1, 1),
+                                lt: new Date(currentYear, currentMonth, 1),
+                            },
+                        },
+                    });
+
+                    if (!attendanceRecord) {
+                        // No attendance record = 0% for this staff
+                        continue;
+                    }
+
+                    // ✅ CORRECT: Parse the string fields
+                    const fullDays = parseFloat(attendanceRecord.fullDays) || 0;
+                    const halfDays = parseFloat(attendanceRecord.halfDays) || 0;
+
+                    // Calculate actual attendance days
+                    const actualAttendanceDays = fullDays + halfDays * 0.5;
+
+                    // Calculate percentage for this staff member
+                    const individualStaffPercentage =
+                        daysInMonth > 0
+                            ? (actualAttendanceDays / daysInMonth) * 100
+                            : 0;
+
+                    totalFloorAttendancePercentage += individualStaffPercentage;
+                }
+
+                // Calculate average attendance percentage for the floor
+                const averageFloorAttendancePercentage = Math.round(
+                    totalFloorAttendancePercentage / staffInFloor.length
+                );
+
+                floorAttendanceData.push({
+                    floor: floor.name,
+                    attendance: averageFloorAttendancePercentage,
+                });
+            }
+
+            return floorAttendanceData;
+        } catch (error) {
+            console.error("Error fetching floor attendance:", error);
+            throw error;
+        }
+    }
+
+    async getAccountantFloorAttendance(month, year) {
+        try {
+            const currentMonth = parseInt(month);
+            const currentYear = parseInt(year);
+
+            // Get the number of days in the current month
+            const daysInMonth = new Date(
+                currentYear,
+                currentMonth,
+                0
+            ).getDate();
+
+            // Get all floors
+            const floors = await prisma.floor.findMany({
+                where: { isDlt: false },
+            });
+
+            const floorAttendanceData = [];
+
+            for (const floor of floors) {
+                // Get all active staff belonging to this floor
+                const staffInFloor = await prisma.user.findMany({
+                    where: {
+                        floor_id: floor.id,
+                        role: "Staff",
+                        isDlt: false,
+                    },
+                    select: { id: true },
+                });
+
+                if (staffInFloor.length === 0) {
+                    // If no staff in the floor, attendance is 0%
+                    floorAttendanceData.push({
+                        floor: floor.name,
+                        attendance: 0,
+                    });
+                    continue;
+                }
+
+                let totalFloorAttendancePercentage = 0;
+
+                for (const staffMember of staffInFloor) {
+                    // Get attendance records for this specific staff member for the specified month
+                    const attendanceRecords = await prisma.attendance.findMany({
+                        where: {
+                            staffId: staffMember.id.toString(),
+                            createdAt: {
+                                gte: new Date(currentYear, currentMonth - 1, 1),
+                                lt: new Date(currentYear, currentMonth, 1),
+                            },
+                        },
+                    });
+
+                    // Calculate actual attendance days for this staff member
+                    const actualAttendanceDays = attendanceRecords.reduce(
+                        (sum, record) => {
+                            const fullDays = parseInt(record.fullDays) || 0;
+                            const halfDays = parseInt(record.halfDays) || 0;
+                            return sum + fullDays + halfDays * 0.5;
+                        },
+                        0
+                    );
+
+                    // Calculate individual staff attendance percentage for the month
+                    const individualStaffPercentage =
+                        daysInMonth > 0
+                            ? (actualAttendanceDays / daysInMonth) * 100
+                            : 0;
+
+                    totalFloorAttendancePercentage += individualStaffPercentage;
+                }
+
+                // Calculate average attendance percentage for the entire floor
+                const averageFloorAttendancePercentage = Math.round(
+                    totalFloorAttendancePercentage / staffInFloor.length
+                );
+
+                floorAttendanceData.push({
+                    floor: floor.name,
+                    attendance: averageFloorAttendancePercentage,
+                });
+            }
+
+            return floorAttendanceData;
+        } catch (error) {
+            console.error("Error fetching floor attendance:", error);
+            return [];
+        }
     }
     async getEmployee() {
         const users = await prisma.user.findMany({
@@ -822,7 +1309,80 @@ class DatabaseStorage {
 
         return results;
     }
+    async getWalkoutsOwner() {
+        try {
+            const walkouts = await prisma.walkOut.findMany({
+                where: { isDlt: false },
+                include: {
+                    staff: true,
+                    type: true,
+                    itemName: true,
+                    submittedBy: true,
+                },
+                orderBy: { created_at: "desc" },
+            });
 
+            const priorityCount = await prisma.walkOut.count({
+                where: {
+                    isDlt: false,
+                    priority: "High",
+                },
+            });
+
+            const now = new Date();
+
+            const startOfWeek = new Date(now);
+            startOfWeek.setDate(now.getDate() - now.getDay());
+            startOfWeek.setHours(0, 0, 0, 0);
+
+            const endOfWeek = new Date(startOfWeek);
+            endOfWeek.setDate(startOfWeek.getDate() + 6);
+            endOfWeek.setHours(23, 59, 59, 999);
+
+            const weekWalkoutCount = await prisma.walkOut.count({
+                where: {
+                    isDlt: false,
+                    created_at: {
+                        gte: startOfWeek,
+                        lte: endOfWeek,
+                    },
+                },
+            });
+
+            // === Today Count ===
+            const startOfToday = new Date(now);
+            startOfToday.setHours(0, 0, 0, 0);
+
+            const endOfToday = new Date(now);
+            endOfToday.setHours(23, 59, 59, 999);
+
+            const todayCount = await prisma.walkOut.count({
+                where: {
+                    isDlt: false,
+                    created_at: {
+                        gte: startOfToday,
+                        lte: endOfToday,
+                    },
+                },
+            });
+
+            return {
+                walkouts,
+                priorityCount,
+                weekWalkoutCount,
+                todayCount,
+            };
+        } catch (error) {
+            console.error("Error in getWalkoutsOwner:", error);
+            return {
+                walkouts: [],
+                priorityCount: 0,
+                weekWalkoutCount: 0,
+                todayCount: 0,
+                staffs: [],
+            };
+        }
+    }
     async getWalkouts(supervisorId) {
         const supervisor = await prisma.user.findUnique({
             where: { id: supervisorId },
@@ -953,7 +1513,7 @@ class DatabaseStorage {
         return await prisma.walkOut.update({
             where: { id: numericId },
             data: {
-                reason: data.reason,
+                description: data.description,
                 priority: data.priority,
 
                 staff: data.staffId
@@ -961,7 +1521,7 @@ class DatabaseStorage {
                     : undefined,
             },
             include: {
-                itemNameId: true,
+                itemName: true,
                 type: true,
                 staff: true,
             },
@@ -1032,6 +1592,7 @@ class DatabaseStorage {
                 mobile: data.mobile,
                 role: "Staff",
                 uniqueId: data.uniqueId,
+                pin_hash: data.pin ? await hashPassword(data.pin) : null,
             },
         });
     }
@@ -1042,11 +1603,19 @@ class DatabaseStorage {
     }
 
     async superVisorEditUser(id, data) {
+        const updateData = { ...data };
+
+        // Handle PIN update if provided
+        if (data.pin && data.pin.trim() !== "") {
+            updateData.pin_hash = await bcrypt.hash(data.pin, 10);
+        }
+
+        // Remove pin from updateData as we don't store it directly
+        delete updateData.pin;
+
         return await prisma.user.update({
             where: { id },
-            data: {
-                ...data,
-            },
+            data: updateData,
         });
     }
 
@@ -1068,6 +1637,10 @@ class DatabaseStorage {
     }
 
     async logoutSupervisor(id) {
+        // Clear all active sessions for this user
+        await this.logoutAllSessions(id);
+
+        // Set user as inactive
         return await prisma.user.update({
             where: { id },
             data: {
@@ -1131,7 +1704,7 @@ class DatabaseStorage {
                         },
                     },
                     update: {
-                        qtySold: sale.qty,
+                        qtySold: Math.round(sale.qty),
                         salesAmount: sale.total,
                         profit: sale.profit,
                         per: sale.per,
@@ -1142,8 +1715,7 @@ class DatabaseStorage {
                     create: {
                         staffId: staff.staffId.id,
                         year_code: sale.category,
-                        qtySold: sale.qty,
-                        netQty: sale.qty,
+                        qtySold: Math.round(sale.qty),
                         salesAmount: sale.total,
                         prodValue: sale.pvalue,
                         profit: sale.profit,
@@ -1166,6 +1738,21 @@ class DatabaseStorage {
             })) || null
         );
     }
+
+    async createStaffFromUpload(staffData) {
+        return await prisma.user.create({
+            data: {
+                uniqueId: staffData.uniqueId,
+                name: staffData.name,
+                role: staffData.role || "Staff",
+                floor_id: null, // Will be assigned later if needed
+                section: null,
+                mobile: null,
+                pin_hash: null,
+            },
+            select: { id: true },
+        });
+    }
     async upload(file, userId) {
         return await prisma.upload.create({
             data: {
@@ -1175,6 +1762,12 @@ class DatabaseStorage {
                 size: file.size,
                 uploadedBy_id: userId,
             },
+        });
+    }
+
+    async getUploadById(id) {
+        return await prisma.upload.findUnique({
+            where: { id: parseInt(id) },
         });
     }
     async getMonthlyData(type) {
@@ -1200,6 +1793,7 @@ class DatabaseStorage {
                     mode: "insensitive",
                 },
                 isDlt: false,
+                role: "Staff",
             },
             select: {
                 id: true,
@@ -1215,11 +1809,12 @@ class DatabaseStorage {
                 data: {
                     staffId: item.staffId,
                     date: new Date(month),
-                    staffId: item.staffId,
-                    fullDays: item.fullDays,
-                    halfDays: item.halfDays,
-                    leaveCount: item.leaveCount,
-                    totalDays: item.totalDays,
+                    staffId: String(item.staffId),
+                    fullDays: String(item.fullDays),
+                    halfDays: String(item.halfDays),
+                    leaveCount: String(item.leaveCount),
+                    totalDays: String(item.totalDays),
+
                     submittedBy_id: id,
                 },
             });
@@ -1466,7 +2061,7 @@ class DatabaseStorage {
         });
     }
     async getScoreKpi() {
-        const kpis = await prisma.kPI.findMany({
+        const kpis = await prisma.KPI.findMany({
             where: { isDlt: false },
         });
 
@@ -1508,6 +2103,136 @@ class DatabaseStorage {
             },
         });
     }
+
+    // Get user scores for scoring page
+    async getUserScores(id) {
+        try {
+            const scores = await prisma.score.findMany({
+                where: {
+                    user_id: id,
+                    isDlt: false,
+                },
+                include: {
+                    kpi: true,
+                },
+                orderBy: {
+                    created_at: "desc",
+                },
+            });
+
+            // Transform to match expected format
+            return scores.map((score) => ({
+                kpi_id: score.kpi_id,
+                score: score.score,
+                comment: score.comment,
+                kpi: score.kpi,
+            }));
+        } catch (error) {
+            console.error("Error fetching user scores:", error);
+            throw error;
+        }
+    }
+    // Submit score for supervisor scoring
+    async submitScore(scores, staffId, supervisorId) {
+        try {
+            const results = [];
+            for (const score of scores) {
+                const latestScore = await prisma.score.findFirst({
+                    where: {
+                        user_id: staffId,
+                        kpi_id: score.kpiId,
+                        isDlt: false,
+                    },
+                    orderBy: { created_at: "desc" },
+                });
+
+                let trend = "same";
+                if (latestScore) {
+                    if (score.score > latestScore.score) trend = "up";
+                    else if (score.score < latestScore.score) trend = "down";
+                }
+
+                const res = await prisma.score.create({
+                    data: {
+                        kpi_id: score.kpiId,
+                        user_id: staffId,
+                        points: (score.score / 5) * score.weight,
+                        score: score.score,
+                        trend,
+                        evalutedby_user_id: supervisorId,
+                        status: "approved",
+                        comment: score.comment,
+                        evalutedDate: null,
+                    },
+                });
+                results.push(res);
+            }
+
+            return results;
+        } catch (error) {
+            console.error("Error submitting score:", error);
+            throw error;
+        }
+    }
+
+    // Update score for supervisor scoring
+    async updateScore(scores, staffId, supervisorId) {
+        try {
+            const results = [];
+            for (const score of scores) {
+                const latestScore = await prisma.score.findFirst({
+                    where: {
+                        user_id: staffId,
+                        kpi_id: score.kpiId,
+                        isDlt: false,
+                    },
+                    orderBy: { created_at: "desc" },
+                });
+
+                if (latestScore) {
+                    let trend = "same";
+                    if (score.score > latestScore.score) trend = "up";
+                    else if (score.score < latestScore.score) trend = "down";
+
+                    const updated = await prisma.score.update({
+                        where: { id: latestScore.id },
+                        data: {
+                            score: score.score,
+                            points: (score.score / 5) * score.weight,
+                            comment: score.comment,
+                            trend,
+                            updated_at: new Date(),
+                        },
+                    });
+
+                    results.push(updated);
+                } else {
+                    // if no previous score exists → create a new one
+                    const created = await prisma.score.create({
+                        data: {
+                            kpi_id: score.kpiId,
+                            user_id: staffId,
+                            points: (score.score / 5) * score.weight,
+                            score: score.score,
+                            trend: "new",
+                            evalutedby_user_id: supervisorId,
+                            status: "approved",
+                            comment: score.comment,
+                            evalutedDate: null,
+                        },
+                    });
+
+                    results.push(created);
+                }
+            }
+
+            return results;
+        } catch (error) {
+            console.error("Error updating score:", error);
+            throw error;
+        }
+    }
+
     async updateScoreEmployee(staffId, body) {
         const results = [];
         for (const score of body.scores) {
@@ -1553,16 +2278,16 @@ class DatabaseStorage {
 
         return results;
     }
-    async getStaffReport(startDate, endDate){
+    async getStaffReport(startDate, endDate) {
         try {
             console.log("getStaffReport called with:", { startDate, endDate });
-            
+
             // Parse dates if provided
             let whereClause = {
                 isDlt: false,
                 role: {
-                    not: "Owner"
-                }
+                    not: "Owner",
+                },
             };
 
             // Add date filtering if dates are provided
@@ -1570,10 +2295,10 @@ class DatabaseStorage {
                 const start = new Date(startDate);
                 const end = new Date(endDate);
                 end.setHours(23, 59, 59, 999); // Include the entire end date
-                
+
                 whereClause.created_at = {
                     gte: start,
-                    lte: end
+                    lte: end,
                 };
             }
 
@@ -1583,24 +2308,30 @@ class DatabaseStorage {
                     scores: {
                         where: {
                             isDlt: false,
-                            ...(startDate && endDate ? {
-                                created_at: {
-                                    gte: new Date(startDate),
-                                    lte: new Date(endDate)
-                                }
-                            } : {})
-                        }
+                            ...(startDate && endDate
+                                ? {
+                                      created_at: {
+                                          gte: new Date(startDate),
+                                          lte: new Date(endDate),
+                                      },
+                                  }
+                                : {}),
+                        },
                     },
-                    floor: true
-                }
+                    floor: true,
+                },
             });
 
             console.log("Found staff:", staffWithScores.length);
-            const staffReport = staffWithScores.map(staff => {
-                const totalScore = staff.scores.reduce((sum, score) => sum + score.points, 0);
-                const avgScore = staff.scores.length > 0 ? Math.round(totalScore / staff.scores.length) : 0;
-
-
+            const staffReport = staffWithScores.map((staff) => {
+                const totalScore = staff.scores.reduce(
+                    (sum, score) => sum + score.points,
+                    0
+                );
+                const avgScore =
+                    staff.scores.length > 0
+                        ? Math.round(totalScore / staff.scores.length)
+                        : 0;
 
                 const staffData = {
                     staffId: staff.uniqueId,
@@ -1610,21 +2341,1404 @@ class DatabaseStorage {
                     section: staff.section,
                     floor: staff.floor?.name || "N/A",
                     avgScore,
-                   
                 };
 
-                console.log("Staff data:", staff.name, "Scores:", staff.scores.length);
+                console.log(
+                    "Staff data:",
+                    staff.name,
+                    "Scores:",
+                    staff.scores.length
+                );
                 return staffData;
             });
 
             // Sort by average score (descending)
             staffReport.sort((a, b) => b.avgScore - a.avgScore);
 
-            console.log("getStaffReport returning:", staffReport.length, "staff members");
+            console.log(
+                "getStaffReport returning:",
+                staffReport.length,
+                "staff members"
+            );
             return staffReport;
         } catch (error) {
             console.error("Error in getStaffReport:", error);
             throw error;
+        }
+    }
+
+    async getSalesReport(month, year) {
+        // Derive date range from month/year (month is 0/1 indexed on frontend? we expect numeric 0-11 or 1-12; handle both)
+        const numericMonth = month != null ? Number(month) : undefined;
+        const numericYear = year != null ? Number(year) : undefined;
+
+        let startDate;
+        let endDate;
+        if (numericYear != null && numericMonth != null) {
+            const m = numericMonth > 11 ? numericMonth - 1 : numericMonth; // support 1-12 or 0-11
+            startDate = new Date(numericYear, m, 1);
+            endDate = endOfMonth(startDate);
+        } else if (numericYear != null && numericMonth == null) {
+            startDate = startOfYear(new Date(numericYear, 0, 1));
+            endDate = endOfYear(new Date(numericYear, 0, 1));
+        } else {
+            // default current month
+            startDate = startOfMonth(new Date());
+            endDate = endOfMonth(new Date());
+        }
+
+        // Group sales by staff within the date range
+        const grouped = await prisma.sales.groupBy({
+            by: ["staffId"],
+            where: {
+                createdAt: { gte: startDate, lte: endDate },
+            },
+            _sum: {
+                qtySold: true,
+                salesAmount: true,
+                prodValue: true,
+                profit: true,
+                points: true,
+                weight: true,
+            },
+        });
+
+        const staffIds = grouped.map((g) => g.staffId);
+        const staffMap = new Map(
+            (
+                await prisma.user.findMany({
+                    where: { id: { in: staffIds } },
+                    select: {
+                        id: true,
+                        name: true,
+                        uniqueId: true,
+                        role: true,
+                    },
+                })
+            ).map((u) => [u.id, u])
+        );
+
+        const list = grouped.map((g) => {
+            const staff = staffMap.get(g.staffId);
+            return {
+                staffId: staff?.uniqueId || g.staffId,
+                staffName: staff?.name || "Unknown",
+                role: staff?.role || "",
+                qtySold: g._sum.qtySold || 0,
+                salesAmount: g._sum.salesAmount || 0,
+                prodValue: g._sum.prodValue || 0,
+                profit: g._sum.profit || 0,
+                points: g._sum.points || 0,
+                weight: g._sum.weight || 0,
+            };
+        });
+
+        // Totals summary
+        const summary = list.reduce(
+            (acc, s) => {
+                acc.totalQty += s.qtySold;
+                acc.totalSales += s.salesAmount;
+                acc.totalProfit += s.profit;
+                acc.totalPoints += s.points;
+                return acc;
+            },
+            { totalQty: 0, totalSales: 0, totalProfit: 0, totalPoints: 0 }
+        );
+
+        return { list, summary };
+    }
+
+    async getAttendanceReport(month, year) {
+        // Default to current month if no month/year provided
+        let startDate, endDate;
+        if (month != null && year != null) {
+            const m = month > 11 ? month - 1 : month; // support 1-12 or 0-11
+            startDate = new Date(year, m, 1);
+            endDate = endOfMonth(startDate);
+        } else {
+            // default current month
+            startDate = startOfMonth(new Date());
+            endDate = endOfMonth(new Date());
+        }
+
+        // Get attendance data for the period
+        const attendanceData = await prisma.attendance.findMany({
+            where: {
+                date: { gte: startDate, lte: endDate },
+            },
+            include: {
+                staff: {
+                    select: {
+                        id: true,
+                        name: true,
+                        uniqueId: true,
+                        role: true,
+                        section: true,
+                        floor: { select: { name: true } },
+                    },
+                },
+            },
+            orderBy: { date: "desc" },
+        });
+
+        // Calculate summary
+        const totalStaff = await prisma.user.count({
+            where: { isDlt: false, role: { not: "Owner" } },
+        });
+
+        const totalAttendance = attendanceData.length;
+        const totalFullDays = attendanceData.reduce(
+            (sum, a) => sum + (a.fullDays || 0),
+            0
+        );
+        const totalHalfDays = attendanceData.reduce(
+            (sum, a) => sum + (a.halfDays || 0),
+            0
+        );
+        const totalLeaves = attendanceData.reduce(
+            (sum, a) => sum + (a.leaveCount || 0),
+            0
+        );
+
+        return {
+            attendance: attendanceData,
+            summary: {
+                totalStaff,
+                totalAttendance,
+                totalFullDays,
+                totalHalfDays,
+                totalLeaves,
+            },
+        };
+    }
+
+    async getWalkoutReport(month, year) {
+        // Default to current month if no month/year provided
+        let startDate, endDate;
+        if (month != null && year != null) {
+            const m = month > 11 ? month - 1 : month; // support 1-12 or 0-11
+            startDate = new Date(year, m, 1);
+            endDate = endOfMonth(startDate);
+        } else {
+            // default current month
+            startDate = startOfMonth(new Date());
+            endDate = endOfMonth(new Date());
+        }
+
+        // Get walkout data for the period
+        const walkoutData = await prisma.walkOut.findMany({
+            where: {
+                created_at: { gte: startDate, lte: endDate },
+                isDlt: false,
+            },
+            include: {
+                staff: {
+                    select: {
+                        id: true,
+                        name: true,
+                        uniqueId: true,
+                        role: true,
+                        section: true,
+                        floor: { select: { name: true } },
+                    },
+                },
+                itemName: { select: { name: true } },
+                type: { select: { name: true } },
+                submittedBy: {
+                    select: {
+                        id: true,
+                        name: true,
+                        uniqueId: true,
+                    },
+                },
+            },
+            orderBy: { created_at: "desc" },
+        });
+
+        // Calculate summary
+        const totalWalkouts = walkoutData.length;
+        const highPriority = walkoutData.filter(
+            (w) => w.priority === "High"
+        ).length;
+        const mediumPriority = walkoutData.filter(
+            (w) => w.priority === "Medium"
+        ).length;
+        const lowPriority = walkoutData.filter(
+            (w) => w.priority === "Low"
+        ).length;
+
+        return {
+            walkouts: walkoutData,
+            summary: {
+                totalWalkouts,
+                highPriority,
+                mediumPriority,
+                lowPriority,
+            },
+        };
+    }
+
+    // Dashboard Graph Data Methods
+    async getDashboardGraphData(type, months = 4) {
+        try {
+            const currentDate = new Date();
+            const graphData = [];
+
+            for (let i = months - 1; i >= 0; i--) {
+                const targetDate = new Date(
+                    currentDate.getFullYear(),
+                    currentDate.getMonth() - i,
+                    1
+                );
+                const startDate = startOfMonth(targetDate);
+                const endDate = endOfMonth(targetDate);
+
+                const monthName = targetDate.toLocaleDateString("en-US", {
+                    month: "short",
+                });
+                const year = targetDate.getFullYear();
+
+                let value = 0;
+
+                try {
+                    switch (type) {
+                        case "sales":
+                            const salesData = await prisma.sales.aggregate({
+                                where: {
+                                    createdAt: { gte: startDate, lte: endDate },
+                                },
+                                _sum: {
+                                    salesAmount: true,
+                                },
+                            });
+                            value = salesData._sum.salesAmount || 0;
+                            break;
+
+                        case "walkouts":
+                            const walkoutCount = await prisma.walkOut.count({
+                                where: {
+                                    created_at: {
+                                        gte: startDate,
+                                        lte: endDate,
+                                    },
+                                    isDlt: false,
+                                },
+                            });
+                            value = walkoutCount;
+                            break;
+
+                        case "staff":
+                            const staffCount = await prisma.user.count({
+                                where: {
+                                    created_at: {
+                                        gte: startDate,
+                                        lte: endDate,
+                                    },
+                                    isDlt: false,
+                                    role: { not: "Owner" },
+                                },
+                            });
+                            value = staffCount;
+                            break;
+
+                        default:
+                            value = 0;
+                    }
+                } catch (dbError) {
+                    console.error(
+                        `Database error for ${type} in month ${monthName}:`,
+                        dbError
+                    );
+                    value = 0; // Set default value if database query fails
+                }
+
+                graphData.push({
+                    month: monthName,
+                    year: year,
+                    value: value,
+                    period: `${monthName} ${year}`,
+                });
+            }
+
+            return graphData;
+        } catch (error) {
+            console.error("Error in getDashboardGraphData:", error);
+            // Return empty array if there's a general error
+            return [];
+        }
+    }
+
+    async getFloorPerformanceData() {
+        try {
+            const floors = await prisma.floor.findMany({
+                where: { isDlt: false },
+                include: {
+                    users: {
+                        where: { isDlt: false, role: { not: "Owner" } },
+                        include: {
+                            sales: {
+                                where: {
+                                    date: { gte: startOfMonth(new Date()) },
+                                },
+                            },
+                        },
+                    },
+                },
+            });
+
+            const floorData = floors.map((floor) => {
+                const totalSales = floor.users.reduce((sum, user) => {
+                    return (
+                        sum +
+                        user.sales.reduce(
+                            (userSum, sale) =>
+                                userSum + parseFloat(sale.salesAmount || 0),
+                            0
+                        )
+                    );
+                }, 0);
+
+                // Show only 10% of actual sales for graph display (same as AccountantScreen)
+                const displaySales = totalSales * 0.1;
+
+                return {
+                    floor: floor.name,
+                    sales: displaySales,
+                    staffCount: floor.users.length,
+                };
+            });
+
+            return floorData;
+        } catch (error) {
+            console.error("Error in getFloorPerformanceData:", error);
+            // Return empty array if database connection fails
+            return [];
+        }
+    }
+
+    // Graph data methods for supervisor dashboard
+    async getSalesGraphData(supervisorId, timeframe) {
+        try {
+            const supervisor = await prisma.user.findUnique({
+                where: { id: supervisorId },
+                include: { floor: true },
+            });
+
+            if (!supervisor?.floor) {
+                return [];
+            }
+
+            const endDate = new Date();
+            const startDate = new Date();
+
+            if (timeframe === "week") {
+                startDate.setDate(endDate.getDate() - 28); // Last 4 weeks
+            } else {
+                startDate.setMonth(endDate.getMonth() - 4); // Last 4 months
+            }
+
+            const salesData = await prisma.sales.findMany({
+                where: {
+                    createdAt: {
+                        gte: startDate,
+                        lte: endDate,
+                    },
+                    staff: {
+                        floor_id: supervisor.floor.id,
+                    },
+                },
+                include: {
+                    staff: true,
+                },
+            });
+
+            // Group by time period
+            const groupedData = {};
+            salesData.forEach((sale) => {
+                const date = new Date(sale.created_at);
+                let period;
+
+                if (timeframe === "week") {
+                    const weekNum =
+                        Math.floor(
+                            (date - startDate) / (7 * 24 * 60 * 60 * 1000)
+                        ) + 1;
+                    period = `Week ${weekNum}`;
+                } else {
+                    const monthNum =
+                        Math.floor(
+                            (date - startDate) / (30 * 24 * 60 * 60 * 1000)
+                        ) + 1;
+                    period = `Month ${monthNum}`;
+                }
+
+                if (!groupedData[period]) {
+                    groupedData[period] = 0;
+                }
+                groupedData[period] += sale.quantity || 0;
+            });
+
+            return Object.entries(groupedData).map(([name, value]) => ({
+                name,
+                value,
+            }));
+        } catch (error) {
+            console.error("Error fetching sales graph data:", error);
+            return [];
+        }
+    }
+
+    async getWalkoutGraphData(supervisorId, timeframe) {
+        try {
+            const supervisor = await prisma.user.findUnique({
+                where: { id: supervisorId },
+                include: { floor: true },
+            });
+
+            if (!supervisor?.floor) {
+                return [];
+            }
+
+            const endDate = new Date();
+            const startDate = new Date();
+
+            if (timeframe === "week") {
+                startDate.setDate(endDate.getDate() - 28); // Last 4 weeks
+            } else {
+                startDate.setMonth(endDate.getMonth() - 4); // Last 4 months
+            }
+
+            const walkoutData = await prisma.walkOut.findMany({
+                where: {
+                    created_at: {
+                        gte: startDate,
+                        lte: endDate,
+                    },
+                    staff: {
+                        floor_id: supervisor.floor.id,
+                    },
+                },
+            });
+
+            // Group by time period
+            const groupedData = {};
+            walkoutData.forEach((walkout) => {
+                const date = new Date(walkout.created_at);
+                let period;
+
+                if (timeframe === "week") {
+                    const weekNum =
+                        Math.floor(
+                            (date - startDate) / (7 * 24 * 60 * 60 * 1000)
+                        ) + 1;
+                    period = `Week ${weekNum}`;
+                } else {
+                    const monthNum =
+                        Math.floor(
+                            (date - startDate) / (30 * 24 * 60 * 60 * 1000)
+                        ) + 1;
+                    period = `Month ${monthNum}`;
+                }
+
+                if (!groupedData[period]) {
+                    groupedData[period] = 0;
+                }
+                groupedData[period]++;
+            });
+
+            return Object.entries(groupedData).map(([name, value]) => ({
+                name,
+                value,
+            }));
+        } catch (error) {
+            console.error("Error fetching walkout graph data:", error);
+            return [];
+        }
+    }
+
+    async getStaffGraphData(supervisorId, timeframe) {
+        try {
+            const supervisor = await prisma.user.findUnique({
+                where: { id: supervisorId },
+                include: { floor: true },
+            });
+
+            if (!supervisor?.floor) {
+                return [];
+            }
+
+            const endDate = new Date();
+            const startDate = new Date();
+
+            if (timeframe === "week") {
+                startDate.setDate(endDate.getDate() - 28); // Last 4 weeks
+            } else {
+                startDate.setMonth(endDate.getMonth() - 4); // Last 4 months
+            }
+
+            const staffData = await prisma.score.findMany({
+                where: {
+                    created_at: {
+                        gte: startDate,
+                        lte: endDate,
+                    },
+                    user: {
+                        floor_id: supervisor.floor.id,
+                    },
+                },
+                include: {
+                    user: true,
+                    kpi: true,
+                },
+            });
+
+            // Group by time period and calculate average scores
+            const groupedData = {};
+            staffData.forEach((score) => {
+                const date = new Date(score.created_at);
+                let period;
+
+                if (timeframe === "week") {
+                    const weekNum =
+                        Math.floor(
+                            (date - startDate) / (7 * 24 * 60 * 60 * 1000)
+                        ) + 1;
+                    period = `Week ${weekNum}`;
+                } else {
+                    const monthNum =
+                        Math.floor(
+                            (date - startDate) / (30 * 24 * 60 * 60 * 1000)
+                        ) + 1;
+                    period = `Month ${monthNum}`;
+                }
+
+                if (!groupedData[period]) {
+                    groupedData[period] = { total: 0, count: 0 };
+                }
+                groupedData[period].total += score.score || 0;
+                groupedData[period].count++;
+            });
+
+            return Object.entries(groupedData).map(([name, data]) => ({
+                name,
+                value:
+                    data.count > 0
+                        ? Math.round((data.total / data.count) * 10) / 10
+                        : 0,
+            }));
+        } catch (error) {
+            console.error("Error fetching staff graph data:", error);
+            return [];
+        }
+    }
+
+    // Supervisor reports methods
+    async getSupervisorFloor(supervisorId) {
+        try {
+            const supervisor = await prisma.user.findUnique({
+                where: { id: supervisorId },
+                include: { floor: true },
+            });
+            return supervisor?.floor;
+        } catch (error) {
+            console.error("Error fetching supervisor floor:", error);
+            return null;
+        }
+    }
+
+    // Get staff for supervisor scoring (floor-specific)
+    async getSupervisorStaffForScoring(supervisorId) {
+        try {
+            // First get supervisor's floor
+            const supervisor = await prisma.user.findUnique({
+                where: { id: supervisorId },
+                include: { floor: true },
+            });
+
+            if (!supervisor?.floor) {
+                return [];
+            }
+
+            // Get all staff from supervisor's floor
+            const staff = await prisma.user.findMany({
+                where: {
+                    floorId: supervisor.floor.id,
+                    role: "Staff", // Only get staff members, not other supervisors
+                    isActive: true,
+                },
+                include: {
+                    floor: true,
+                    scores: {
+                        where: {
+                            created_at: {
+                                gte: new Date(new Date().setHours(0, 0, 0, 0)), // Today
+                            },
+                        },
+                        orderBy: {
+                            created_at: "desc",
+                        },
+                        take: 1,
+                    },
+                },
+            });
+
+            // Transform data to match expected format
+            return staff.map((user) => ({
+                id: user.id,
+                name: user.name,
+                mobile: user.mobile,
+                email: user.email,
+                role: user.role,
+                section: user.section,
+                floor: user.floor,
+                isScored: user.scores.length > 0,
+                score: user.scores.length > 0 ? user.scores[0].score : 0,
+                lastScoreDate:
+                    user.scores.length > 0 ? user.scores[0].createdAt : null,
+            }));
+        } catch (error) {
+            console.error(
+                "Error fetching supervisor staff for scoring:",
+                error
+            );
+            throw error;
+        }
+    }
+
+    async getSupervisorReports(supervisorId, range) {
+        try {
+            const supervisor = await prisma.user.findUnique({
+                where: { id: supervisorId },
+                include: { floor: true },
+            });
+
+            if (!supervisor?.floor) {
+                return {
+                    staff: [],
+                    walkouts: [],
+                    sales: [],
+                    floorInfo: null,
+                };
+            }
+
+            const endDate = new Date();
+            const startDate = new Date();
+
+            switch (range) {
+                case "week":
+                    startDate.setDate(endDate.getDate() - 7);
+                    break;
+                case "month":
+                    startDate.setMonth(endDate.getMonth() - 1);
+                    break;
+                case "quarter":
+                    startDate.setMonth(endDate.getMonth() - 3);
+                    break;
+                default:
+                    startDate.setMonth(endDate.getMonth() - 1);
+            }
+
+            // Get staff data for the supervisor's floor
+            const staff = await prisma.user.findMany({
+                where: {
+                    floor_id: supervisor.floor.id,
+                    isDlt: false,
+                    role: { not: "FloorSupervisor" },
+                },
+                include: {
+                    scores: {
+                        include: {
+                            kpi: true,
+                        },
+                        where: {
+                            created_at: {
+                                gte: startDate,
+                                lte: endDate,
+                            },
+                        },
+                    },
+                },
+            });
+
+            // Calculate average scores and KPI counts for staff
+            const staffWithStats = staff.map((member) => {
+                const scores = member.scores || [];
+                const averageScore =
+                    scores.length > 0
+                        ? scores.reduce(
+                              (sum, score) => sum + (score.score || 0),
+                              0
+                          ) / scores.length
+                        : 0;
+                const kpiCount = scores.length;
+                const lastUpdated =
+                    scores.length > 0
+                        ? new Date(
+                              Math.max(
+                                  ...scores.map((s) => new Date(s.created_at))
+                              )
+                          )
+                        : null;
+
+                return {
+                    ...member,
+                    averageScore: Math.round(averageScore * 10) / 10,
+                    kpiCount,
+                    lastUpdated: lastUpdated
+                        ? lastUpdated.toLocaleDateString()
+                        : null,
+                };
+            });
+
+            // Get walkouts data for the supervisor's floor
+            const walkouts = await prisma.walkOut.findMany({
+                where: {
+                    created_at: {
+                        gte: startDate,
+                        lte: endDate,
+                    },
+                    staff: {
+                        floor_id: supervisor.floor.id,
+                    },
+                },
+                include: {
+                    staff: true,
+                    itemName: true,
+                    type: true,
+                },
+                orderBy: {
+                    created_at: "desc",
+                },
+            });
+
+            // Get sales data for the supervisor's floor
+            const sales = await prisma.sales.findMany({
+                where: {
+                    created_at: {
+                        gte: startDate,
+                        lte: endDate,
+                    },
+                    user: {
+                        floor_id: supervisor.floor.id,
+                    },
+                },
+                include: {
+                    user: true,
+                },
+                orderBy: {
+                    created_at: "desc",
+                },
+            });
+
+            return {
+                staff: staffWithStats,
+                walkouts,
+                sales,
+                floorInfo: {
+                    name: supervisor.floor.name,
+                    floorNumber: supervisor.floor.floorNumber || "N/A",
+                    section: supervisor.floor.section || "N/A",
+                },
+            };
+        } catch (error) {
+            console.error("Error fetching supervisor reports:", error);
+            return {
+                staff: [],
+                walkouts: [],
+                sales: [],
+                floorInfo: null,
+            };
+        }
+    }
+
+    // Individual report methods for supervisor
+    async getSupervisorStaffReport(supervisorId, start, end) {
+        try {
+            const supervisor = await prisma.user.findUnique({
+                where: { id: supervisorId },
+                include: { floor: true },
+            });
+
+            if (!supervisor?.floor) {
+                return [];
+            }
+
+            // Build date filter
+            const dateFilter = {};
+            if (start && end) {
+                dateFilter.created_at = {
+                    gte: new Date(start),
+                    lte: new Date(end),
+                };
+            }
+
+            // Get staff data for the supervisor's floor
+            const staff = await prisma.user.findMany({
+                where: {
+                    floor_id: supervisor.floor.id,
+                    isDlt: false,
+                    role: "Staff",
+                },
+                include: {
+                    scores: {
+                        include: {
+                            kpi: true,
+                        },
+                        where: dateFilter,
+                    },
+                },
+            });
+
+            // Calculate statistics for each staff member
+            const staffWithStats = staff.map((member) => {
+                const scores = member.scores || [];
+                const avgScore =
+                    scores.length > 0
+                        ? scores.reduce(
+                              (sum, score) => sum + (score.score || 0),
+                              0
+                          ) / scores.length
+                        : 0;
+                const totalKPIs = scores.length;
+                const completedKPIs = scores.filter((s) => s.score > 0).length;
+
+                return {
+                    staffId: member.uniqueId,
+                    name: member.name,
+                    mobile: member.mobile,
+                    email: member.email,
+                    role: member.role,
+                    section: member.section,
+                    floor: member.floor,
+                    active_flag: member.active_flag,
+                    avgScore: Math.round(avgScore * 10) / 10,
+                    totalKPIs,
+                    completedKPIs,
+                    completionRate:
+                        totalKPIs > 0
+                            ? Math.round((completedKPIs / totalKPIs) * 100)
+                            : 0,
+                };
+            });
+
+            return staffWithStats;
+        } catch (error) {
+            console.error("Error fetching supervisor staff report:", error);
+            return [];
+        }
+    }
+
+    async getSupervisorSalesReport(supervisorId, start, end) {
+        try {
+            const supervisor = await prisma.user.findUnique({
+                where: { id: supervisorId },
+                include: { floor: true },
+            });
+
+            if (!supervisor?.floor) {
+                return { list: [], summary: {} };
+            }
+
+            // Build date filter
+            const dateFilter =
+                start && end
+                    ? {
+                          created_at: {
+                              gte: new Date(start),
+                              lte: new Date(end),
+                          },
+                      }
+                    : {};
+
+            // Get sales data for the supervisor’s floor
+            const sales = await prisma.sales.findMany({
+                where: {
+                    user: {
+                        floor_id: supervisor.floor.id,
+                    },
+                    ...dateFilter,
+                },
+                include: {
+                    user: true,
+                },
+                orderBy: {
+                    created_at: "desc",
+                },
+            });
+
+            // Summary accumulators
+            let totalQty = 0;
+            let totalRevenue = 0;
+            let totalProfit = 0;
+            let totalPoints = 0;
+
+            // Group sales by staff
+            const staffSales = {};
+
+            for (const sale of sales) {
+                const user = sale.user;
+                if (!user) continue;
+
+                const staffKey = user.id;
+
+                if (!staffSales[staffKey]) {
+                    staffSales[staffKey] = {
+                        staffId: user.uniqueId,
+                        staffName: user.name,
+                        mobile: user.mobile || "N/A",
+                        email: user.email || "N/A",
+                        qtySold: 0,
+                        salesAmount: 0,
+                        prodValue: 0,
+                        profit: 0,
+                        points: 0,
+                    };
+                }
+
+                const qty = sale.quantity || 0;
+                const price = sale.price || 0;
+                const prodValue = sale.prodValue || 0;
+                const salesAmount = qty * price;
+                const profit = salesAmount - prodValue;
+                const points = sale.points || 0;
+
+                staffSales[staffKey].qtySold += qty;
+                staffSales[staffKey].salesAmount += salesAmount;
+                staffSales[staffKey].prodValue += prodValue;
+                staffSales[staffKey].profit += profit;
+                staffSales[staffKey].points += points;
+
+                totalQty += qty;
+                totalRevenue += salesAmount;
+                totalProfit += profit;
+                totalPoints += points;
+            }
+
+            const list = Object.values(staffSales);
+
+            return {
+                list,
+                summary: {
+                    totalQty,
+                    totalRevenue,
+                    totalProfit,
+                    totalPoints,
+                    totalStaff: list.length,
+                    avgSaleValue: list.length ? totalRevenue / list.length : 0,
+                },
+            };
+        } catch (error) {
+            console.error("Error fetching supervisor sales report:", error);
+            return { list: [], summary: {} };
+        }
+    }
+
+    async getSupervisorAttendanceReport(supervisorId, start, end) {
+        try {
+            const supervisor = await prisma.user.findUnique({
+                where: { id: supervisorId },
+                include: { floor: true },
+            });
+
+            if (!supervisor?.floor) {
+                return { list: [], summary: {} };
+            }
+
+            // Build date filter
+            const dateFilter = {};
+            if (start && end) {
+                dateFilter.created_at = {
+                    gte: new Date(start),
+                    lte: new Date(end),
+                };
+            }
+
+            // Get attendance data for the supervisor's floor
+            const attendance = await prisma.attendance.findMany({
+                where: {
+                    staff: {
+                        floor_id: supervisor.floor.id,
+                    },
+                    ...dateFilter,
+                },
+                include: {
+                    staff: true,
+                },
+                orderBy: {
+                    created_at: "desc",
+                },
+            });
+
+            // Transform attendance data to match export format
+            const list = attendance.map((record) => ({
+                staff: {
+                    uniqueId: record.staff.uniqueId,
+                    name: record.staff.name,
+                },
+                date: record.date,
+                fullDays: parseInt(record.fullDays) || 0,
+                halfDays: parseInt(record.halfDays) || 0,
+                leaveCount: parseInt(record.leaveCount) || 0,
+                totalDays: parseInt(record.totalDays) || 1,
+            }));
+
+            // Calculate summary
+            const totalAttendance = attendance.length;
+            const presentCount = attendance.reduce(
+                (sum, a) => sum + (parseInt(a.fullDays) || 0),
+                0
+            );
+            const absentCount = attendance.reduce(
+                (sum, a) => sum + (parseInt(a.leaveCount) || 0),
+                0
+            );
+            const attendanceRate =
+                totalAttendance > 0
+                    ? (presentCount / totalAttendance) * 100
+                    : 0;
+
+            return {
+                list,
+                summary: {
+                    totalAttendance,
+                    presentCount,
+                    absentCount,
+                    attendanceRate: Math.round(attendanceRate * 100) / 100,
+                },
+            };
+        } catch (error) {
+            console.error(
+                "Error fetching supervisor attendance report:",
+                error
+            );
+            return { list: [], summary: {} };
+        }
+    }
+
+    async getSupervisorWalkoutReport(supervisorId, start, end) {
+        try {
+            const supervisor = await prisma.user.findUnique({
+                where: { id: supervisorId },
+                include: { floor: true },
+            });
+
+            if (!supervisor?.floor) {
+                return { list: [], summary: {} };
+            }
+
+            // Build date filter
+            const dateFilter = {};
+            if (start && end) {
+                dateFilter.created_at = {
+                    gte: new Date(start),
+                    lte: new Date(end),
+                };
+            }
+
+            // Get walkout data for the supervisor's floor
+            const walkouts = await prisma.walkOut.findMany({
+                where: {
+                    staff: {
+                        floor_id: supervisor.floor.id,
+                    },
+                    ...dateFilter,
+                },
+                include: {
+                    staff: true,
+                    itemName: true,
+                    type: true,
+                    submittedBy: true,
+                },
+                orderBy: {
+                    created_at: "desc",
+                },
+            });
+
+            // Calculate summary
+            const totalWalkouts = walkouts.length;
+            const highPriorityCount = walkouts.filter(
+                (w) => w.priority === "high"
+            ).length;
+            const mediumPriorityCount = walkouts.filter(
+                (w) => w.priority === "medium"
+            ).length;
+            const lowPriorityCount = walkouts.filter(
+                (w) => w.priority === "low"
+            ).length;
+
+            return {
+                list: walkouts,
+                summary: {
+                    totalWalkouts,
+                    highPriorityCount,
+                    mediumPriorityCount,
+                    lowPriorityCount,
+                },
+            };
+        } catch (error) {
+            console.error("Error fetching supervisor walkout report:", error);
+            return { list: [], summary: {} };
+        }
+    }
+
+    async getAccountantSalesGraph( month, year) {
+        try {
+            const monthNames = [
+                "Jan",
+                "Feb",
+                "Mar",
+                "Apr",
+                "May",
+                "Jun",
+                "Jul",
+                "Aug",
+                "Sep",
+                "Oct",
+                "Nov",
+                "Dec",
+            ];
+            const currentMonth = parseInt(month);
+            const currentYear = parseInt(year);
+            const graphData = [];
+
+            // Get data for last 4 months
+            for (let i = 3; i >= 0; i--) {
+                const monthIndex = currentMonth - 1 - i;
+                const adjustedMonthIndex =
+                    monthIndex < 0 ? monthIndex + 12 : monthIndex;
+                const adjustedYear =
+                    monthIndex < 0 ? currentYear - 1 : currentYear;
+
+                // Get sales data for this month
+                const salesData = await prisma.sales.aggregate({
+                    where: {
+                        date: {
+                            gte: new Date(adjustedYear, adjustedMonthIndex, 1),
+                            lt: new Date(
+                                adjustedYear,
+                                adjustedMonthIndex + 1,
+                                1
+                            ),
+                        },
+                    },
+                    _sum: {
+                        salesAmount: true,
+                    },
+                });
+
+                graphData.push({
+                    name: `${monthNames[adjustedMonthIndex]} ${adjustedYear}`,
+                    value: salesData._sum.salesAmount || 0,
+                });
+            }
+
+            return graphData;
+        } catch (error) {
+            console.error("Error fetching accountant sales graph:", error);
+            return [];
+        }
+    }
+
+    async getAccountantStaffGraph(accountantId, month, year) {
+        try {
+            const monthNames = [
+                "Jan",
+                "Feb",
+                "Mar",
+                "Apr",
+                "May",
+                "Jun",
+                "Jul",
+                "Aug",
+                "Sep",
+                "Oct",
+                "Nov",
+                "Dec",
+            ];
+            const currentMonth = parseInt(month);
+            const currentYear = parseInt(year);
+            const graphData = [];
+
+            // Get data for last 4 months
+            for (let i = 3; i >= 0; i--) {
+                const monthIndex = currentMonth - 1 - i;
+                const adjustedMonthIndex =
+                    monthIndex < 0 ? monthIndex + 12 : monthIndex;
+                const adjustedYear =
+                    monthIndex < 0 ? currentYear - 1 : currentYear;
+
+                // Get staff creation data for this month
+                const staffData = await prisma.user.count({
+                    where: {
+                        created_at: {
+                            gte: new Date(adjustedYear, adjustedMonthIndex, 1),
+                            lt: new Date(
+                                adjustedYear,
+                                adjustedMonthIndex + 1,
+                                1
+                            ),
+                        },
+                        role: {
+                            in: ["Staff", "FloorSupervisor"],
+                        },
+                    },
+                });
+
+                graphData.push({
+                    period: `${monthNames[adjustedMonthIndex]} ${adjustedYear}`,
+                    value: staffData || 0,
+                });
+            }
+
+            return graphData;
+        } catch (error) {
+            console.error("Error fetching accountant staff graph:", error);
+            return [];
+        }
+    }
+
+    async getFloors() {
+        try {
+            const floors = await prisma.floor.findMany({
+                where: { isDlt: false },
+                select: {
+                    id: true,
+                    name: true,
+                },
+            });
+
+            console.log("Floors from database:", floors);
+            return floors;
+        } catch (error) {
+            console.error("Error fetching floors:", error);
+            return [];
+        }
+    }
+
+    async getFloorAttendanceData() {
+        try {
+            const currentDate = new Date();
+            const currentMonth = currentDate.getMonth() + 1;
+            const currentYear = currentDate.getFullYear();
+
+            // Get the number of days in the current month
+            const daysInMonth = new Date(
+                currentYear,
+                currentMonth,
+                0
+            ).getDate();
+
+            // Get all floors
+            const floors = await prisma.floor.findMany({
+                where: { isDlt: false },
+            });
+
+            const floorAttendanceData = [];
+
+            for (const floor of floors) {
+                // Get all active staff belonging to this floor
+                const staffInFloor = await prisma.user.findMany({
+                    where: {
+                        floor_id: floor.id,
+                        role: "Staff",
+                        isDlt: false,
+                        active_flag: true,
+                    },
+                    select: { id: true },
+                });
+
+                if (staffInFloor.length === 0) {
+                    // If no staff in the floor, attendance is 0%
+                    floorAttendanceData.push({
+                        floor: floor.name,
+                        attendance: 0,
+                    });
+                    continue;
+                }
+
+                let totalFloorAttendancePercentage = 0;
+
+                for (const staffMember of staffInFloor) {
+                    // Get attendance records for this specific staff member for the current month
+                    const attendanceRecord = await prisma.attendance.findFirst({
+                        where: {
+                            staffId: staffMember.id.toString(),
+                            date: {
+                                gte: new Date(currentYear, currentMonth - 1, 1),
+                                lt: new Date(currentYear, currentMonth, 1),
+                            },
+                        },
+                    });
+
+                    if (!attendanceRecord) {
+                        // No attendance record = 0% for this staff
+                        continue;
+                    }
+
+                    // Parse the string fields
+                    const fullDays = parseFloat(attendanceRecord.fullDays) || 0;
+                    const halfDays = parseFloat(attendanceRecord.halfDays) || 0;
+
+                    // Calculate actual attendance days
+                    const actualAttendanceDays = fullDays + halfDays * 0.5;
+
+                    // Calculate percentage for this staff member
+                    const individualStaffPercentage =
+                        daysInMonth > 0
+                            ? (actualAttendanceDays / daysInMonth) * 100
+                            : 0;
+
+                    totalFloorAttendancePercentage += individualStaffPercentage;
+                }
+
+                // Calculate average attendance percentage for the floor
+                const averageFloorAttendancePercentage = Math.round(
+                    totalFloorAttendancePercentage / staffInFloor.length
+                );
+
+                floorAttendanceData.push({
+                    floor: floor.name,
+                    attendance: averageFloorAttendancePercentage,
+                });
+            }
+
+            return floorAttendanceData;
+        } catch (error) {
+            console.error("Error fetching floor attendance data:", error);
+            return [];
+        }
+    }
+
+    async searchStaffByName(query) {
+        console.log(query, "544");
+
+        try {
+            const staffs = await prisma.user.findMany({
+                where: {
+                    isDlt: false,
+                    role: { not: "Owner" },
+                    name: {
+                        startsWith: query,
+                        mode: "insensitive",
+                    },
+                },
+                select: {
+                    id: true,
+                    uniqueId: true,
+                    name: true,
+                    role: true,
+                    floor: {
+                        select: {
+                            name: true,
+                        },
+                    },
+                },
+            });
+
+            return staffs;
+        } catch (error) {
+            console.error("Error in searchStaffByName:", error);
+            return [];
         }
     }
 }

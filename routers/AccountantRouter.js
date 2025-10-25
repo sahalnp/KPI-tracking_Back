@@ -12,6 +12,13 @@ import {
     staffList,
     updatePin,
     uploadData,
+    getSalesGraph,
+    getStaffGraph,
+    getFloorData,
+    getFloorAttendance,
+    getFloors,
+    downloadFile,
+
 } from "../controller/AccountantController.js";
 import { upload } from "../middleware/upload.js";
 
@@ -33,5 +40,19 @@ accountRouter.post("/attendance", verifyTokens, addAttendence);
 accountRouter.get("/getstaff", verifyTokens, staffList);
 accountRouter.get("/getDetails", verifyTokens, getDetails);
 accountRouter.get("/sales-reports", verifyTokens, getScore);
+accountRouter.get("/getSalesGraph", verifyTokens, getSalesGraph);
+accountRouter.get("/getStaffGraph", verifyTokens, getStaffGraph);
+accountRouter.get("/getFloorData", verifyTokens, getFloorData);
+accountRouter.get("/getFloorAttendance", verifyTokens, getFloorAttendance);
+accountRouter.get("/getFloors", verifyTokens, getFloors);
+
+// Download file route
+accountRouter.get("/download-file/:fileId", verifyTokens, downloadFile);
+
+// Check staff route
+// accountRouter.get("/check-staff", verifyTokens, checkStaff);
+
+// // List uploaded files route
+// accountRouter.get("/list-files", verifyTokens, listUploadedFiles);
 
 export default accountRouter;

@@ -23,6 +23,26 @@ import {
     updateScore,
     updateStatus,
     updateUser,
+    salesReport,
+    exportSalesReport,
+    attendanceReport,
+    walkoutReport,
+    exportAttendanceReport,
+    exportWalkoutReport,
+    getDashboardGraphData,
+    getFloorPerformanceData,
+    getFloorAttendanceData,
+    getFloors,
+    checkIdExists,
+    // Owner Walkout Management
+    addWalkout,
+    editWalkout,
+    deleteWalkout,
+    exportWalkouts,
+    getItemName,
+    getItemType,
+    searchStaff,
+    getWalkoutsOwner,
 } from "../controller/OwnerController.js";
 import verifyTokens from "../middleware/verifyMiddleware.js";
 
@@ -36,11 +56,29 @@ ownerRouter.get("/staff-scoring",verifyTokens,getScoreEmployee)
 ownerRouter.get("/userscore/:id",verifyTokens,getEditScore)
 ownerRouter.get("/staffReport",verifyTokens,staffReport)
 ownerRouter.get("/staffReport/export",verifyTokens,exportStaffReport)
+ownerRouter.get("/salesReport",verifyTokens,salesReport)
+ownerRouter.get("/salesReport/export",verifyTokens,exportSalesReport)
+ownerRouter.get("/attendanceReport",verifyTokens,attendanceReport)
+ownerRouter.get("/attendanceReport/export",verifyTokens,exportAttendanceReport)
+ownerRouter.get("/walkoutReport",verifyTokens,walkoutReport)
+ownerRouter.get("/walkoutReport/export",verifyTokens,exportWalkoutReport)
+ownerRouter.get("/dashboard/graph",verifyTokens,getDashboardGraphData)
+ownerRouter.get("/dashboard/floor-performance",verifyTokens,getFloorPerformanceData)
+ownerRouter.get("/dashboard/floor-attendance",verifyTokens,getFloorAttendanceData)
+ownerRouter.get("/getFloors",verifyTokens,getFloors)
+ownerRouter.get("/check-id",verifyTokens,checkIdExists)
+
+// Owner Walkout Management Routes
+ownerRouter.get("/getWalkouts", verifyTokens, getWalkoutsOwner)
+ownerRouter.get("/getItemName", verifyTokens, getItemName)
+ownerRouter.get("/getItemType", verifyTokens, getItemType)
+ownerRouter.get("/searchStaff", verifyTokens, searchStaff)
 //POST routers
 ownerRouter.post("/addKpi", verifyTokens,addKpi);
 ownerRouter.post("/addUser",verifyTokens,addUser);
 ownerRouter.post("/logout",verifyTokens,logout)
 ownerRouter.post("/submit-score",verifyTokens,addEmployeeScore)
+ownerRouter.post("/addWalkout", verifyTokens, addWalkout)
 
 
 //PUT routers
@@ -48,11 +86,13 @@ ownerRouter.put("/editKpi/:id", verifyTokens,updateKpi);
 ownerRouter.put("/updateUser/:id", verifyTokens,updateUser);
 ownerRouter.put("/editOwner/:id",verifyTokens,updateMe)
 ownerRouter.put("/updateScore/:id",verifyTokens,updateScore)
+ownerRouter.put("/editWalkout/:id", verifyTokens, editWalkout)
 
 
 //DELETE routers
 ownerRouter.delete("/dltKpi", verifyTokens,dltKpi);
 ownerRouter.delete("/deleteUser/:id", verifyTokens,dltUsers);
+ownerRouter.delete("/dltWalkt/:id", verifyTokens, deleteWalkout)
 
 //PATCH routers
 ownerRouter.patch("/updateStatus", verifyTokens,updateStatus)

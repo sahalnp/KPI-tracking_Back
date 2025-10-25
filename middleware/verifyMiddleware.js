@@ -4,6 +4,7 @@ import { generateAccessToken } from "../utils/TokenGenerator.js";
 import { prisma } from "../index.js";
 
 const verifyTokens = async (req, res, next) => {
+  console.log("🔍 Middleware called for:", req.path);
   try {
     const accessToken = req.cookies.accesstoken;
     const refreshToken = req.cookies.refreshtoken;
@@ -11,8 +12,9 @@ const verifyTokens = async (req, res, next) => {
 
     // 1️⃣ No refresh token → block immediately
     if (!refreshToken) {
-      res.cookie("accesstoken", "", { maxAge: 0 });
-
+      // Clear all cookies
+      res.cookie("accesstoken", "", { maxAge: 0, httpOnly: true, secure: true, sameSite: 'none' });
+      res.cookie("refreshtoken", "", { maxAge: 0, httpOnly: true, secure: true, sameSite: 'none' });
       
       return res.status(401).json({
         success: false,
@@ -20,14 +22,37 @@ const verifyTokens = async (req, res, next) => {
       });
     }
 
-    // 2️⃣ Check if refresh token exists in DB
-    const tokenDoc = await prisma.token.findUnique({ where: { token: refreshToken } });
+
+    const tokenDoc = await prisma.token.findUnique({ 
+      where: { 
+        token: refreshToken,
+        is_active: true 
+      } 
+    });
+    
     if (!tokenDoc) {
-      res.cookie("accesstoken", "", { maxAge: 0 });
-      res.cookie("refreshtoken", "", { maxAge: 0 });
+      // Clear all cookies
+      res.cookie("accesstoken", "", { maxAge: 0, httpOnly: true, secure: true, sameSite: 'none' });
+      res.cookie("refreshtoken", "", { maxAge: 0, httpOnly: true, secure: true, sameSite: 'none' });
       return res.status(401).json({
         success: false,
         message: "Invalid refresh token. Please login.",
+      });
+    }
+
+    // 2.1️⃣ Check if token has expired in database
+    if (tokenDoc.expiry && new Date() > tokenDoc.expiry) {
+      // Mark token as inactive and clear all cookies
+      await prisma.token.update({
+        where: { id: tokenDoc.id },
+        data: { is_active: false }
+      });
+      
+      res.cookie("accesstoken", "", { maxAge: 0, httpOnly: true, secure: true, sameSite: 'none' });
+      res.cookie("refreshtoken", "", { maxAge: 0, httpOnly: true, secure: true, sameSite: 'none' });
+      return res.status(401).json({
+        success: false,
+        message: "Token has expired. Please login again.",
       });
     }
 
@@ -36,9 +61,15 @@ const verifyTokens = async (req, res, next) => {
     try {
       refreshUser = jwt.verify(refreshToken, process.env.REFRESH_SECRET);
     } catch (err) {
-      await prisma.token.deleteMany({ where: { token: refreshToken } });
-      res.cookie("accesstoken", "", { maxAge: 0 });
-      res.cookie("refreshtoken", "", { maxAge: 0 });
+      // Mark token as inactive instead of deleting
+      await prisma.token.updateMany({ 
+        where: { token: refreshToken },
+        data: { is_active: false }
+      });
+      
+      // Clear all cookies
+      res.cookie("accesstoken", "", { maxAge: 0, httpOnly: true, secure: true, sameSite: 'none' });
+      res.cookie("refreshtoken", "", { maxAge: 0, httpOnly: true, secure: true, sameSite: 'none' });
       return res.status(401).json({
         success: false,
         message: "Refresh token expired or invalid. Please login.",
@@ -96,12 +127,16 @@ const verifyTokens = async (req, res, next) => {
         return next();
       }
 
-      return res.status(403).json({
+      // Clear all cookies for invalid access token
+      res.cookie("accesstoken", "", { maxAge: 0, httpOnly: true, secure: true, sameSite: 'none' });
+      res.cookie("refreshtoken", "", { maxAge: 0, httpOnly: true, secure: true, sameSite: 'none' });
+      return res.status(401).json({
         success: false,
-        message: "Invalid access token.",
+        message: "Invalid access token. Please login.",
       });
     }
   } catch (err) {
+    console.error("🚨 Middleware error:", err);
     return res.status(500).json({
       success: false,
       message: "Internal server error",

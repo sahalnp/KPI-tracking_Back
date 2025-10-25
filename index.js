@@ -22,13 +22,21 @@ const app = express();
 export const prisma = new PrismaClient();
 app.use(cors({
   origin: function (origin, callback) {
+    // Allow all origins in development
+    if (process.env.NODE_ENV !== 'production') {
+      return callback(null, true);
+    }
+    
     if (!origin) return callback(null, true);
     
     const allowedOrigins = [
       "https://kpi-tracking-front.onrender.com", 
       "http://localhost:3000",                   
+      "http://localhost:5173",  // Vite default port
       "http://127.0.0.1:3000",
+      "http://127.0.0.1:5173",  // Vite default port
       "http://0.0.0.0:3000",
+      "http://0.0.0.0:5173",    // Vite default port
       "http://10.63.194.166:3000"
     ];
     
