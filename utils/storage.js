@@ -77,7 +77,7 @@ class DatabaseStorage {
             })) || null
         );
     }
-    
+
     async getDeletedUsersCount() {
         return await prisma.user.count({
             where: {
@@ -850,7 +850,7 @@ class DatabaseStorage {
         }
     }
 
-    async getAccountantDetails( month, year) {
+    async getAccountantDetails(month, year) {
         try {
             const startDate = new Date(year, month - 1, 1);
             const endDate = new Date(year, month, 1);
@@ -2233,7 +2233,7 @@ class DatabaseStorage {
         }
     }
 
-    async updateScoreEmployee(staffId, body) {
+    async updateScoreEmployee(id, staffId, body) {
         const results = [];
         for (const score of body.scores) {
             const latestScore = await prisma.score.findFirst({
@@ -2262,25 +2262,40 @@ class DatabaseStorage {
                 // if no previous score exists → create a new one
                 const created = await prisma.score.create({
                     data: {
-                        kpi_id: score.kpiId,
-                        user_id: staffId,
                         points: (score.score / 5) * score.weight,
                         score: score.score,
                         trend: "same",
                         comment: score.comment,
                         status: "approved",
                         evalutedDate: null,
+
+                        // ✅ Proper relation connections
+                        user: {
+                            connect: { id: staffId },
+                        },
+                        kpi: {
+                            connect: { id: score.kpiId },
+                        },
+                        evalutedby: {
+                            connect: { id },
+                        },
                     },
                 });
+
                 results.push(created);
             }
         }
 
         return results;
     }
-    async getStaffReport(startDate, endDate) {
+    async getStaffReport(startDate, endDate, month, year) {
         try {
-            console.log("getStaffReport called with:", { startDate, endDate });
+            console.log("getStaffReport called with:", {
+                startDate,
+                endDate,
+                month,
+                year,
+            });
 
             // Parse dates if provided
             let whereClause = {
@@ -2290,17 +2305,8 @@ class DatabaseStorage {
                 },
             };
 
-            // Add date filtering if dates are provided
-            if (startDate && endDate) {
-                const start = new Date(startDate);
-                const end = new Date(endDate);
-                end.setHours(23, 59, 59, 999); // Include the entire end date
-
-                whereClause.created_at = {
-                    gte: start,
-                    lte: end,
-                };
-            }
+            // Don't filter users by creation date - we want all users
+            // Only filter their scores by the date range
 
             const staffWithScores = await prisma.user.findMany({
                 where: whereClause,
@@ -2317,6 +2323,12 @@ class DatabaseStorage {
                                   }
                                 : {}),
                         },
+                        include: {
+                            kpi: true,
+                        },
+                        orderBy: {
+                            created_at: 'desc'
+                        }
                     },
                     floor: true,
                 },
@@ -2333,21 +2345,61 @@ class DatabaseStorage {
                         ? Math.round(totalScore / staff.scores.length)
                         : 0;
 
+                // Calculate KPI-specific scores
+                const kpiScores = {};
+                const kpiAverages = {};
+
+                staff.scores.forEach((score) => {
+                    const kpiName = score.kpi?.name || "Unknown";
+                    if (!kpiScores[kpiName]) {
+                        kpiScores[kpiName] = [];
+                    }
+                    kpiScores[kpiName].push(score.score);
+                });
+
+                // Calculate average for each KPI
+                Object.keys(kpiScores).forEach((kpiName) => {
+                    const scores = kpiScores[kpiName];
+                    if (scores.length > 0) {
+                        kpiAverages[kpiName] = Math.round(
+                            scores.reduce((sum, score) => sum + score, 0) /
+                                scores.length
+                        );
+                    } else {
+                        kpiAverages[kpiName] = 0;
+                    }
+                });
+
+                console.log(
+                    "Staff KPI calculation:",
+                    staff.name,
+                    "Total scores:",
+                    staff.scores.length,
+                    "KPI averages:",
+                    kpiAverages
+                );
+
                 const staffData = {
-                    staffId: staff.uniqueId,
+                    id: staff.id, // Database UUID
+                    staffId: staff.uniqueId, // Unique ID for display
                     name: staff.name,
                     mobile: staff.mobile,
                     role: staff.role,
                     section: staff.section,
                     floor: staff.floor?.name || "N/A",
                     avgScore,
+                    kpiScores: kpiAverages,
+                    totalKPIs: Object.keys(kpiAverages).length,
+                    joinDate: staff.created_at, // Add join date for grouping
                 };
 
                 console.log(
                     "Staff data:",
                     staff.name,
                     "Scores:",
-                    staff.scores.length
+                    staff.scores.length,
+                    "KPIs:",
+                    Object.keys(kpiAverages)
                 );
                 return staffData;
             });
@@ -2363,6 +2415,57 @@ class DatabaseStorage {
             return staffReport;
         } catch (error) {
             console.error("Error in getStaffReport:", error);
+            throw error;
+        }
+    }
+
+    // New function to get staff report grouped by month
+    async getStaffReportByMonth(startDate, endDate, month, year) {
+        try {
+            console.log("getStaffReportByMonth called with:", {
+                startDate,
+                endDate,
+                month,
+                year,
+            });
+
+            // Get all staff data
+            const staffReport = await this.getStaffReport(startDate, endDate, month, year);
+            
+            // Group staff by month based on join date
+            const monthGroups = {};
+            const monthNames = [
+                'January', 'February', 'March', 'April', 'May', 'June',
+                'July', 'August', 'September', 'October', 'November', 'December'
+            ];
+            
+            // Initialize empty arrays for each month
+            monthNames.forEach(monthName => {
+                monthGroups[monthName] = [];
+            });
+
+            // Group staff by their join month
+            staffReport.forEach(staff => {
+                const joinDate = new Date(staff.joinDate);
+                const monthName = joinDate.toLocaleDateString('en-US', { month: 'long' });
+                
+                if (monthGroups[monthName]) {
+                    monthGroups[monthName].push(staff);
+                }
+            });
+
+            // Filter out empty months and return only months with staff
+            const filteredMonthGroups = {};
+            Object.keys(monthGroups).forEach(monthName => {
+                if (monthGroups[monthName].length > 0) {
+                    filteredMonthGroups[monthName] = monthGroups[monthName];
+                }
+            });
+
+            console.log("getStaffReportByMonth returning:", Object.keys(filteredMonthGroups).length, "months with staff");
+            return filteredMonthGroups;
+        } catch (error) {
+            console.error("Error in getStaffReportByMonth:", error);
             throw error;
         }
     }
@@ -2452,11 +2555,9 @@ class DatabaseStorage {
         // Default to current month if no month/year provided
         let startDate, endDate;
         if (month != null && year != null) {
-            const m = month > 11 ? month - 1 : month; // support 1-12 or 0-11
-            startDate = new Date(year, m, 1);
+            startDate = new Date(year, month - 1, 1); // ✅ Corrected
             endDate = endOfMonth(startDate);
         } else {
-            // default current month
             startDate = startOfMonth(new Date());
             endDate = endOfMonth(new Date());
         }
@@ -2488,15 +2589,15 @@ class DatabaseStorage {
 
         const totalAttendance = attendanceData.length;
         const totalFullDays = attendanceData.reduce(
-            (sum, a) => sum + (a.fullDays || 0),
+            (sum, a) => sum + Number(a.fullDays || 0),
             0
         );
         const totalHalfDays = attendanceData.reduce(
-            (sum, a) => sum + (a.halfDays || 0),
+            (sum, a) => sum + Number(a.halfDays || 0),
             0
         );
         const totalLeaves = attendanceData.reduce(
-            (sum, a) => sum + (a.leaveCount || 0),
+            (sum, a) => sum + Number(a.leaveCount || 0),
             0
         );
 
@@ -3250,7 +3351,7 @@ class DatabaseStorage {
                       }
                     : {};
 
-            // Get sales data for the supervisor’s floor
+            // Get sales data for the supervisor's floor
             const sales = await prisma.sales.findMany({
                 where: {
                     user: {
@@ -3481,7 +3582,7 @@ class DatabaseStorage {
         }
     }
 
-    async getAccountantSalesGraph( month, year) {
+    async getAccountantSalesGraph(month, year) {
         try {
             const monthNames = [
                 "Jan",
@@ -3710,8 +3811,6 @@ class DatabaseStorage {
     }
 
     async searchStaffByName(query) {
-        console.log(query, "544");
-
         try {
             const staffs = await prisma.user.findMany({
                 where: {
@@ -3739,6 +3838,1304 @@ class DatabaseStorage {
         } catch (error) {
             console.error("Error in searchStaffByName:", error);
             return [];
+        }
+    }
+
+    async getStaffKPIDetailsById(staffId, startDate, endDate, month, year) {
+        try {
+            console.log(
+                "getStaffKPIDetailsById - Looking for staff with ID:",
+                staffId,
+                "startDate:", startDate,
+                "endDate:", endDate,
+                "month:", month,
+                "year:", year
+            );
+            
+            // Validate date parameters - prevent future dates
+            const now = new Date();
+            const currentYear = now.getFullYear();
+            const currentMonth = now.getMonth() + 1;
+            
+            if (year && parseInt(year) > currentYear) {
+                throw new Error("Cannot fetch data for future years");
+            }
+            
+            if (month && year && parseInt(year) === currentYear && parseInt(month) > currentMonth) {
+                throw new Error("Cannot fetch data for future months");
+            }
+            
+            const staff = await prisma.user.findUnique({
+                where: {
+                    id: staffId,
+                    isDlt: false,
+                },
+                include: {
+                    floor: true,
+                },
+            });
+
+            console.log(
+                "getStaffKPIDetailsById - Staff found:",
+                staff ? "YES" : "NO"
+            );
+            if (!staff) {
+                console.log(
+                    "getStaffKPIDetailsById - Staff member not found for ID:",
+                    staffId
+                );
+                throw new Error("Staff member not found");
+            }
+
+            // Build date filter
+            let dateFilter = {};
+            if (startDate && endDate) {
+                const start = new Date(startDate);
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                dateFilter = {
+                    gte: start,
+                    lte: end,
+                };
+            } else if (month && year) {
+                // Filter by month and year - be explicit about timezone
+                const start = new Date(year, month - 1, 1, 0, 0, 0, 0); // First day of month at 00:00:00
+                const end = new Date(year, month, 0, 23, 59, 59, 999); // Last day of month at 23:59:59
+                dateFilter = {
+                    gte: start,
+                    lte: end,
+                };
+                console.log("Date filter for month/year:", {
+                    month: month,
+                    year: year,
+                    start: start.toISOString(),
+                    end: end.toISOString(),
+                    startLocal: start.toLocaleDateString(),
+                    endLocal: end.toLocaleDateString()
+                });
+            }
+
+            // Get all scores for this staff member with KPI details
+            // This method is specifically for monthly KPIs only
+            const kpiFrequencyFilter = {
+                frequency: "monthly",
+            };
+
+            const scores = await prisma.score.findMany({
+                where: {
+                    user_id: staff.id,
+                    isDlt: false,
+                    ...(Object.keys(dateFilter).length > 0 && {
+                        created_at: dateFilter,
+                    }),
+                    kpi: {
+                        ...kpiFrequencyFilter,
+                        isDlt: false,
+                        status: true,
+                    },
+                },
+                include: {
+                    kpi: true,
+                },
+                orderBy: {
+                    created_at: "desc",
+                },
+            });
+
+            console.log(`Found ${scores.length} MONTHLY scores for staff ${staffId} in month ${month} ${year}`);
+            console.log('Monthly KPI frequencies:', scores.map(s => s.kpi?.frequency).filter(Boolean));
+
+            // Group scores by date and KPI for daily summary
+            const dailyKPIScores = {};
+            const monthlyKPIScores = {};
+
+            scores.forEach((score) => {
+                const kpiName = score.kpi?.name || "Unknown";
+                const dateKey = score.created_at.toISOString().split("T")[0]; // YYYY-MM-DD format
+
+                // Group by date for daily scores
+                if (!dailyKPIScores[dateKey]) {
+                    dailyKPIScores[dateKey] = {};
+                }
+                if (!dailyKPIScores[dateKey][kpiName]) {
+                    dailyKPIScores[dateKey][kpiName] = [];
+                }
+                dailyKPIScores[dateKey][kpiName].push({
+                    score: score.score,
+                    points: score.points,
+                    comment: score.comment,
+                    trend: score.trend,
+                    createdAt: score.created_at,
+                    kpi: score.kpi,
+                });
+
+                // Group by KPI for monthly summary
+                if (!monthlyKPIScores[kpiName]) {
+                    monthlyKPIScores[kpiName] = [];
+                }
+                monthlyKPIScores[kpiName].push({
+                    score: score.score,
+                    points: score.points,
+                    comment: score.comment,
+                    trend: score.trend,
+                    createdAt: score.created_at,
+                    kpi: score.kpi,
+                });
+            });
+
+            // Process daily KPI scores
+            const processedDailyData = {};
+            Object.keys(dailyKPIScores).forEach((date) => {
+                const dayKPIs = dailyKPIScores[date];
+                processedDailyData[date] = {};
+
+                Object.keys(dayKPIs).forEach((kpiName) => {
+                    const kpiScores = dayKPIs[kpiName];
+                    const avgScore =
+                        kpiScores.reduce((sum, s) => sum + s.score, 0) /
+                        kpiScores.length;
+                    const avgPoints =
+                        kpiScores.reduce((sum, s) => sum + s.points, 0) /
+                        kpiScores.length;
+
+                    processedDailyData[date][kpiName] = {
+                        avgScore: Math.round(avgScore * 10) / 10,
+                        avgPoints: Math.round(avgPoints * 10) / 10,
+                        count: kpiScores.length,
+                        weight: kpiScores[0].kpi?.weight || 0,
+                        latestComment: kpiScores[0].comment,
+                        latestTrend: kpiScores[0].trend,
+                    };
+                });
+            });
+
+            // Calculate monthly averages for each KPI
+            const processedMonthlyData = {};
+            Object.keys(monthlyKPIScores).forEach((kpiName) => {
+                const kpiScores = monthlyKPIScores[kpiName];
+                const avgScore =
+                    kpiScores.reduce((sum, s) => sum + s.score, 0) /
+                    kpiScores.length;
+                const avgPoints =
+                    kpiScores.reduce((sum, s) => sum + s.points, 0) /
+                    kpiScores.length;
+
+                processedMonthlyData[kpiName] = {
+                    avgScore: Math.round(avgScore * 10) / 10,
+                    avgPoints: Math.round(avgPoints * 10) / 10,
+                    count: kpiScores.length,
+                    weight: kpiScores[0].kpi?.weight || 0,
+                    latestComment: kpiScores[0].comment,
+                    latestTrend: kpiScores[0].trend,
+                };
+            });
+
+            // Calculate overall monthly summary
+            const allScores = Object.values(processedMonthlyData);
+            const totalPoints = allScores.reduce(
+                (sum, kpi) => sum + kpi.avgPoints,
+                0
+            );
+            const totalWeight = allScores.reduce(
+                (sum, kpi) => sum + kpi.weight,
+                0
+            );
+            const totalScore = allScores.reduce(
+                (sum, kpi) => sum + kpi.avgScore,
+                0
+            );
+            const kpiCount = allScores.length;
+
+            // Calculate weekly summary (last 7 days)
+            const weeklyDates = Object.keys(processedDailyData).slice(0, 7);
+            let weeklyTotalPoints = 0;
+            let weeklyTotalWeight = 0;
+            let weeklyTotalScore = 0;
+            let weeklyCount = 0;
+
+            weeklyDates.forEach((date) => {
+                const dayKPIs = processedDailyData[date];
+                Object.values(dayKPIs).forEach((kpiData) => {
+                    weeklyTotalPoints += kpiData.avgPoints || 0;
+                    weeklyTotalWeight += kpiData.weight || 0;
+                    weeklyTotalScore += kpiData.avgScore || 0;
+                    weeklyCount++;
+                });
+            });
+
+            return {
+                staff: {
+                    id: staff.id,
+                    staffId: staff.uniqueId,
+                    name: staff.name,
+                    mobile: staff.mobile,
+                    role: staff.role,
+                    section: staff.section,
+                    floor: staff.floor?.name || "N/A",
+                },
+                monthlyKPIScores: processedMonthlyData,
+                monthlySummary: {
+                    avgPoints: kpiCount > 0 ? totalPoints / kpiCount : 0,
+                    avgWeight: kpiCount > 0 ? totalWeight / kpiCount : 0,
+                    avgScore: kpiCount > 0 ? totalScore / kpiCount : 0,
+                    totalPoins: totalPoints, // Total points across all KPIs
+                    totalScore: totalScore, // Total score across all KPIs
+                    fullScore: kpiCount * 5, // Maximum possible score (5 per KPI)
+                },
+                totalDays: Object.keys(processedDailyData).length,
+                totalKPIs: kpiCount,
+            };
+        } catch (error) {
+            console.error("Error in getStaffKPIDetails:", error);
+            throw error;
+        }
+    }
+
+    async getStaffDailyKPIDetailsById(
+        staffId,
+        startDate,
+        endDate,
+        month,
+        year
+    ) {
+        try {
+            // staffId is now the real UUID from the database
+            const staff = await prisma.user.findUnique({
+                where: {
+                    id: staffId,
+                    isDlt: false,
+                },
+            });
+
+            if (!staff) {
+                throw new Error("Staff member not found");
+            }
+
+            // Build date filter
+            let dateFilter = {};
+            if (startDate && endDate) {
+                const start = new Date(startDate);
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                dateFilter = {
+                    gte: start,
+                    lte: end,
+                };
+            } else if (month && year) {
+                // Filter by month and year
+                const start = new Date(year, month - 1, 1); // month is 1-based, Date constructor is 0-based
+                const end = new Date(year, month, 0, 23, 59, 59, 999); // Last day of the month
+                dateFilter = {
+                    gte: start,
+                    lte: end,
+                };
+                console.log("Daily date filter for month/year:", {
+                    month: month,
+                    year: year,
+                    start: start.toISOString(),
+                    end: end.toISOString()
+                });
+            }
+
+            // Get only daily frequency KPIs for this staff member
+            const dailyScores = await prisma.score.findMany({
+                where: {
+                    user_id: staff.id,
+                    isDlt: false,
+                    ...(Object.keys(dateFilter).length > 0 && {
+                        created_at: dateFilter,
+                    }),
+                    kpi: {
+                        isDlt: false,
+                        status: true,
+                        frequency: "daily",
+                    },
+                },
+                include: {
+                    kpi: true,
+                },
+                orderBy: {
+                    created_at: "desc",
+                },
+            });
+
+            console.log(`Found ${dailyScores.length} DAILY scores for staff ${staffId} in month ${month} ${year}`);
+            console.log('Daily KPI frequencies:', dailyScores.map(s => s.kpi?.frequency).filter(Boolean));
+
+            // Group scores by date and KPI
+            const dailyKPIScores = {};
+
+            dailyScores.forEach((score) => {
+                const kpiName = score.kpi?.name || "Unknown";
+                const dateKey = score.created_at.toISOString().split("T")[0]; // YYYY-MM-DD format
+
+                if (!dailyKPIScores[dateKey]) {
+                    dailyKPIScores[dateKey] = {};
+                }
+                if (!dailyKPIScores[dateKey][kpiName]) {
+                    dailyKPIScores[dateKey][kpiName] = [];
+                }
+                dailyKPIScores[dateKey][kpiName].push({
+                    score: score.score,
+                    points: score.points,
+                    comment: score.comment,
+                    trend: score.trend,
+                    createdAt: score.created_at,
+                    kpi: score.kpi,
+                });
+            });
+
+            // Process daily KPI scores
+            const processedDailyData = {};
+            Object.keys(dailyKPIScores).forEach((date) => {
+                const dayKPIs = dailyKPIScores[date];
+                processedDailyData[date] = {};
+
+                Object.keys(dayKPIs).forEach((kpiName) => {
+                    const kpiScores = dayKPIs[kpiName];
+                    const avgScore =
+                        kpiScores.reduce((sum, s) => sum + s.score, 0) /
+                        kpiScores.length;
+                    const avgPoints =
+                        kpiScores.reduce((sum, s) => sum + s.points, 0) /
+                        kpiScores.length;
+
+                    processedDailyData[date][kpiName] = {
+                        avgScore: Math.round(avgScore * 10) / 10,
+                        avgPoints: Math.round(avgPoints * 10) / 10,
+                        count: kpiScores.length,
+                        weight: kpiScores[0].kpi?.weight || 0,
+                        latestComment: kpiScores[0].comment,
+                        latestTrend: kpiScores[0].trend,
+                    };
+                });
+            });
+
+            // Calculate daily summary
+            const dailyDates = Object.keys(processedDailyData);
+            let dailyTotalPoints = 0;
+            let dailyTotalWeight = 0;
+            let dailyTotalScore = 0;
+            let dailyCount = 0;
+
+            dailyDates.forEach((date) => {
+                const dayKPIs = processedDailyData[date];
+                Object.values(dayKPIs).forEach((kpiData) => {
+                    dailyTotalPoints += kpiData.avgPoints || 0;
+                    dailyTotalWeight += kpiData.weight || 0;
+                    dailyTotalScore += kpiData.avgScore || 0;
+                    dailyCount++;
+                });
+            });
+
+            return {
+                staff: {
+                    id: staff.id,
+                    staffId: staff.uniqueId,
+                    name: staff.name,
+                    mobile: staff.mobile,
+                    role: staff.role,
+                    section: staff.section,
+                    floor: staff.floor?.name || "N/A",
+                },
+                dailyKPIScores: processedDailyData,
+                dailySummary: {
+                    totalPoints: dailyTotalPoints,
+                    totalWeight:
+                        dailyCount > 0 ? dailyTotalWeight / dailyCount : 0,
+                    totalScore:
+                        dailyCount > 0 ? dailyTotalScore / dailyCount : 0,
+                    avgScore:
+                        dailyCount > 0 ? dailyTotalScore / dailyCount : 0,
+                },
+                totalDays: Object.keys(processedDailyData).length,
+                totalKPIs: dailyCount,
+            };
+        } catch (error) {
+            console.error("Error in getStaffDailyKPIDetails:", error);
+            throw error;
+        }
+    }
+
+    async getStaffWeeklyKPIDetailsById(
+        staffId,
+        startDate,
+        endDate,
+        month,
+        year
+    ) {
+        try {
+            // staffId is now the real UUID from the database
+            const staff = await prisma.user.findUnique({
+                where: {
+                    id: staffId,
+                    isDlt: false,
+                },
+            });
+
+            if (!staff) {
+                throw new Error("Staff member not found");
+            }
+
+            // Build date filter
+            let dateFilter = {};
+            if (startDate && endDate) {
+                const start = new Date(startDate);
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                dateFilter = {
+                    gte: start,
+                    lte: end,
+                };
+            } else if (month && year) {
+                // Filter by month and year
+                const start = new Date(year, month - 1, 1); // month is 1-based, Date constructor is 0-based
+                const end = new Date(year, month, 0, 23, 59, 59, 999); // Last day of the month
+                dateFilter = {
+                    gte: start,
+                    lte: end,
+                };
+                console.log("Weekly date filter for month/year:", {
+                    month: month,
+                    year: year,
+                    start: start.toISOString(),
+                    end: end.toISOString()
+                });
+            }
+
+            // Get only weekly frequency KPIs for this staff member
+            const weeklyScores = await prisma.score.findMany({
+                where: {
+                    user_id: staff.id,
+                    isDlt: false,
+                    ...(Object.keys(dateFilter).length > 0 && {
+                        created_at: dateFilter,
+                    }),
+                    kpi: {
+                        isDlt: false,
+                        status: true,
+                        frequency: "weekly",
+                    },
+                },
+                include: {
+                    kpi: true,
+                },
+                orderBy: {
+                    created_at: "desc",
+                },
+            });
+
+            console.log(`Found ${weeklyScores.length} WEEKLY scores for staff ${staffId} in month ${month} ${year}`);
+            console.log('Weekly KPI frequencies:', weeklyScores.map(s => s.kpi?.frequency).filter(Boolean));
+
+            // Group scores by date and KPI
+            const weeklyKPIScores = {};
+
+            weeklyScores.forEach((score) => {
+                const kpiName = score.kpi?.name || "Unknown";
+                const dateKey = score.created_at.toISOString().split("T")[0]; // YYYY-MM-DD format
+
+                if (!weeklyKPIScores[dateKey]) {
+                    weeklyKPIScores[dateKey] = {};
+                }
+                if (!weeklyKPIScores[dateKey][kpiName]) {
+                    weeklyKPIScores[dateKey][kpiName] = [];
+                }
+                weeklyKPIScores[dateKey][kpiName].push({
+                    score: score.score,
+                    points: score.points,
+                    comment: score.comment,
+                    trend: score.trend,
+                    createdAt: score.created_at,
+                    kpi: score.kpi,
+                });
+            });
+
+            // Process weekly KPI scores
+            const processedWeeklyData = {};
+            Object.keys(weeklyKPIScores).forEach((date) => {
+                const dayKPIs = weeklyKPIScores[date];
+                processedWeeklyData[date] = {};
+
+                Object.keys(dayKPIs).forEach((kpiName) => {
+                    const kpiScores = dayKPIs[kpiName];
+                    const avgScore =
+                        kpiScores.reduce((sum, s) => sum + s.score, 0) /
+                        kpiScores.length;
+                    const avgPoints =
+                        kpiScores.reduce((sum, s) => sum + s.points, 0) /
+                        kpiScores.length;
+
+                    processedWeeklyData[date][kpiName] = {
+                        avgScore: Math.round(avgScore * 10) / 10,
+                        avgPoints: Math.round(avgPoints * 10) / 10,
+                        count: kpiScores.length,
+                        weight: kpiScores[0].kpi?.weight || 0,
+                        latestComment: kpiScores[0].comment,
+                        latestTrend: kpiScores[0].trend,
+                    };
+                });
+            });
+
+            // Calculate weekly summary
+            const weeklyDates = Object.keys(processedWeeklyData);
+            let weeklyTotalPoints = 0;
+            let weeklyTotalWeight = 0;
+            let weeklyTotalScore = 0;
+            let weeklyCount = 0;
+
+            weeklyDates.forEach((date) => {
+                const dayKPIs = processedWeeklyData[date];
+                Object.values(dayKPIs).forEach((kpiData) => {
+                    weeklyTotalPoints += kpiData.avgPoints || 0;
+                    weeklyTotalWeight += kpiData.weight || 0;
+                    weeklyTotalScore += kpiData.avgScore || 0;
+                    weeklyCount++;
+                });
+            });
+
+            return {
+                staff: {
+                    id: staff.id,
+                    staffId: staff.uniqueId,
+                    name: staff.name,
+                    mobile: staff.mobile,
+                    role: staff.role,
+                    section: staff.section,
+                    floor: staff.floor?.name || "N/A",
+                },
+                weeklyKPIScores: processedWeeklyData,
+                weeklySummary: {
+                    totalPoints: weeklyTotalPoints,
+                    totalWeight:
+                        weeklyCount > 0 ? weeklyTotalWeight / weeklyCount : 0,
+                    totalScore:
+                        weeklyCount > 0 ? weeklyTotalScore / weeklyCount : 0,
+                    avgScore:
+                        weeklyCount > 0 ? weeklyTotalScore / weeklyCount : 0,
+                },
+                totalDays: Object.keys(processedWeeklyData).length,
+                totalKPIs: weeklyCount,
+            };
+        } catch (error) {
+            console.error("Error in getStaffWeeklyKPIDetails:", error);
+            throw error;
+        }
+    }
+
+    async getStaffAttendanceReportById(
+        staffId,
+        startDate,
+        endDate,
+        month,
+        year
+    ) {
+        try {
+            let dateFilter = {};
+            let daysInMonth = 30;
+
+            if (startDate && endDate) {
+                const start = new Date(startDate);
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+
+                // Calculate days in the range
+                const diffTime = Math.abs(end - start);
+                daysInMonth = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+
+                dateFilter = {
+                    gte: start,
+                    lte: end,
+                };
+            } else if (month && year) {
+                // Priority 2: If month and year are provided, use those
+                const monthNumber = parseInt(month);
+                const yearNumber = parseInt(year);
+                const start = new Date(yearNumber, monthNumber - 1, 1);
+                const end = endOfMonth(start);
+
+                daysInMonth = new Date(yearNumber, monthNumber, 0).getDate();
+
+                dateFilter = {
+                    gte: start,
+                    lte: end,
+                };
+            } else {
+                // Priority 3: Default to current month
+                const now = new Date();
+                const start = startOfMonth(now);
+                const end = endOfMonth(now);
+                daysInMonth = new Date(
+                    now.getFullYear(),
+                    now.getMonth() + 1,
+                    0
+                ).getDate();
+
+                dateFilter = {
+                    gte: start,
+                    lte: end,
+                };
+            }
+
+            console.log("🔍 Attendance Query Debug:");
+            console.log("Staff ID:", staffId);
+            console.log("Date Filter:", dateFilter);
+            console.log("Days in Month:", daysInMonth);
+
+           const s=await prisma.attendance.findMany({
+
+           })
+           console.log(s,"sfskldfsdlkfjsdfkjkl");
+           
+            const attendanceRecords = await prisma.attendance.findMany({
+                where: {
+                    staffId: staffId,
+                    date: dateFilter,
+                },
+                orderBy: {
+                    date: "desc",
+                },
+            });
+
+            console.log(
+                "📊 Found attendance records:",
+                attendanceRecords.length
+            );
+
+            // Calculate totals
+            let totalFullDays = 0;
+            let totalHalfDays = 0;
+            let totalLeaves = 0;
+
+            attendanceRecords.forEach((record) => {
+                totalFullDays += parseFloat(record.fullDays) || 0;
+                totalHalfDays += parseFloat(record.halfDays) || 0;
+                totalLeaves += parseFloat(record.leaveCount) || 0;
+            });
+
+            // Calculate present days (full days + half days / 2)
+            const presentDays = totalFullDays + totalHalfDays * 0.5;
+
+            // Calculate attendance percentage
+            const attendancePercentage =
+                daysInMonth > 0 ? (presentDays / daysInMonth) * 100 : 0;
+
+            console.log("📊 ATTENDANCE CALCULATION DEBUG:");
+            console.log("Total Full Days:", totalFullDays);
+            console.log("Total Half Days:", totalHalfDays);
+            console.log("Total Leaves:", totalLeaves);
+            console.log("Days in Month:", daysInMonth);
+            console.log("Present Days (Full + Half*0.5):", presentDays);
+            console.log("Attendance %:", attendancePercentage);
+            console.log("Formula: (", presentDays, "/", daysInMonth, ") * 100 =", attendancePercentage);
+
+            return {
+                totalFullDays: Math.round(totalFullDays),
+                totalHalfDays: Math.round(totalHalfDays),
+                totalLeaves: Math.round(totalLeaves),
+                totalDaysInMonth: daysInMonth,
+                presentDays: presentDays.toFixed(1),
+                attendancePercentage: attendancePercentage.toFixed(2),
+            };
+        } catch (error) {
+            console.error("Error in getStaffAttendanceReport:", error);
+            throw error;
+        }
+    }
+
+    async getStaffSalesReportById(staffId, startDate, endDate, month, year) {
+        try {
+            const staff = await prisma.user.findUnique({
+                where: {
+                    id: staffId,
+                    isDlt: false,
+                },
+            });
+
+            if (!staff) {
+                throw new Error("Staff member not found");
+            }
+
+            // Build date filter
+            let dateFilter = {};
+            if (startDate && endDate) {
+                const start = new Date(startDate);
+                const end = new Date(endDate);
+                end.setHours(23, 59, 59, 999);
+                dateFilter = {
+                    gte: start,
+                    lte: end,
+                };
+            } else if (month && year) {
+                const monthNumber = parseInt(month);
+                const yearNumber = parseInt(year);
+                const start = new Date(yearNumber, monthNumber - 1, 1);
+                const end = endOfMonth(start);
+                dateFilter = {
+                    gte: start,
+                    lte: end,
+                };
+            } else {
+                const now = new Date();
+                const start = startOfMonth(now);
+                const end = endOfMonth(now);
+                dateFilter = {
+                    gte: start,
+                    lte: end,
+                };
+            }
+
+            // Get all sales records for this staff member
+            const salesRecords = await prisma.sales.findMany({
+                where: {
+                    staffId: staffId,
+                    ...(Object.keys(dateFilter).length > 0 && {
+                        createdAt: dateFilter,
+                    }),
+                },
+                orderBy: {
+                    createdAt: "desc",
+                },
+            });
+            const salesByYearCode = {};
+            const colorPalette = [
+                { code: "#10B981", name: "Emerald Green" },      // Green
+                { code: "#EAB308", name: "Amber Yellow" },       // Yellow
+                { code: "#3B82F6", name: "Bright Blue" },        // Blue
+                { code: "#8B5CF6", name: "Vibrant Purple" },     // Purple
+                { code: "#F97316", name: "Orange" },             // Orange
+                { code: "#EF4444", name: "Coral Red" },          // Red
+                { code: "#06B6D4", name: "Cyan" },               // Cyan
+                { code: "#F43F5E", name: "Rose" },               // Rose
+                { code: "#84CC16", name: "Lime" },               // Lime
+                { code: "#A855F7", name: "Violet" },             // Violet
+                { code: "#F59E0B", name: "Amber" },              // Amber
+                { code: "#14B8A6", name: "Teal" },               // Teal
+            ];
+
+            let colorIndex = 0;
+            salesRecords.forEach((sale, index) => {
+                const yearCode = sale.year_code || "N/A";
+                if (!salesByYearCode[yearCode]) {
+                    salesByYearCode[yearCode] = {
+                        yearCode: yearCode,
+                        color: colorPalette[colorIndex % colorPalette.length],
+                        records: [],
+                        totals: {
+                            qtySold: 0,
+                            salesAmount: 0,
+                            prodValue: 0,
+                            profit: 0,
+                            points: 0,
+                            per: 0,
+                        },
+                    };
+                    colorIndex++; // Increment to get next color for next unique year code
+                }
+                salesByYearCode[yearCode].records.push(sale);
+                salesByYearCode[yearCode].totals.qtySold +=
+                    parseInt(sale.qtySold) || 0;
+                salesByYearCode[yearCode].totals.salesAmount +=
+                    parseFloat(sale.salesAmount) || 0;
+                salesByYearCode[yearCode].totals.prodValue +=
+                    parseFloat(sale.prodValue) || 0;
+                salesByYearCode[yearCode].totals.profit +=
+                    parseFloat(sale.profit) || 0;
+                salesByYearCode[yearCode].totals.points +=
+                    parseFloat(sale.points) || 0;
+                salesByYearCode[yearCode].totals.per +=
+                    parseFloat(sale.per) || 0;
+            });
+
+            const salesArray = Object.values(salesByYearCode);
+            const totalSales = salesArray.reduce(
+                (sum, item) => sum + item.totals.salesAmount,
+                0
+            );
+
+            salesArray.forEach((item) => {
+                item.percentage =
+                    totalSales > 0
+                        ? (
+                              (item.totals.salesAmount / totalSales) *
+                              100
+                          ).toFixed(1)
+                        : "0.0";
+            });
+
+            return {
+                staff: {
+                    id: staff.id,
+                    staffId: staff.uniqueId,
+                    name: staff.name,
+                    mobile: staff.mobile,
+                },
+                salesByYearCode: salesArray,
+                totalRecords: salesRecords.length,
+            };
+        } catch (error) {
+            console.error("Error in getStaffSalesReportById:", error);
+            throw error;
+        }
+    }
+
+    // All Months Data Functions
+    async getAllMonthsStaffKPIDetailsById(staffId, year) {
+        try {
+            const months = [
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"
+            ];
+            
+            const allMonthsData = {};
+            const kpiAverages = {}; // Store averages for each KPI across all months
+            
+            for (let monthIndex = 0; monthIndex < 12; monthIndex++) {
+                const monthName = months[monthIndex];
+                const monthNumber = monthIndex + 1;
+                
+                try {
+                    console.log(`Fetching data for ${monthName} ${year} (month ${monthNumber})`);
+                    const monthData = await this.getStaffKPIDetailsById(staffId, null, null, monthNumber, year);
+                    console.log(`Data for ${monthName} ${year}:`, monthData ? 'Found' : 'Not found');
+                    if (monthData) {
+                        allMonthsData[monthName] = monthData;
+                        
+                        // Collect KPI data for averaging
+                        if (monthData.monthlyKPIScores) {
+                            Object.keys(monthData.monthlyKPIScores).forEach(kpiName => {
+                                const kpiData = monthData.monthlyKPIScores[kpiName];
+                                if (!kpiAverages[kpiName]) {
+                                    kpiAverages[kpiName] = {
+                                        points: [],
+                                        weights: [],
+                                        scores: [],
+                                        count: 0
+                                    };
+                                }
+                                kpiAverages[kpiName].points.push(kpiData.avgPoints || 0);
+                                kpiAverages[kpiName].weights.push(kpiData.weight || 0);
+                                kpiAverages[kpiName].scores.push(kpiData.avgScore || 0);
+                                kpiAverages[kpiName].count++;
+                            });
+                        }
+                    }
+                } catch (error) {
+                    console.log(`No data for ${monthName} ${year}:`, error.message);
+                    // Continue with next month if no data
+                }
+            }
+            
+            // Calculate averages for each KPI
+            const averagedKPIs = {};
+            Object.keys(kpiAverages).forEach(kpiName => {
+                const kpiData = kpiAverages[kpiName];
+                const avgPoints = kpiData.points.length > 0 
+                    ? kpiData.points.reduce((sum, point) => sum + point, 0) / kpiData.points.length 
+                    : 0;
+                const avgWeight = kpiData.weights.length > 0 
+                    ? kpiData.weights.reduce((sum, weight) => sum + weight, 0) / kpiData.weights.length 
+                    : 0;
+                const avgScore = kpiData.scores.length > 0 
+                    ? kpiData.scores.reduce((sum, score) => sum + score, 0) / kpiData.scores.length 
+                    : 0;
+                
+                averagedKPIs[kpiName] = {
+                    avgPoints: Math.round(avgPoints * 10) / 10,
+                    avgWeight: Math.round(avgWeight * 10) / 10,
+                    avgScore: Math.round(avgScore * 10) / 10,
+                    count: kpiData.count
+                };
+            });
+            
+            // Add averaged data to the result
+            allMonthsData._averages = {
+                monthlyKPIScores: averagedKPIs,
+                monthlySummary: {
+                    avgPoints: Object.values(averagedKPIs).length > 0 
+                        ? Object.values(averagedKPIs).reduce((sum, kpi) => sum + kpi.avgPoints, 0) / Object.values(averagedKPIs).length 
+                        : 0,
+                    avgWeight: Object.values(averagedKPIs).length > 0 
+                        ? Object.values(averagedKPIs).reduce((sum, kpi) => sum + kpi.avgWeight, 0) / Object.values(averagedKPIs).length 
+                        : 0,
+                    avgScore: Object.values(averagedKPIs).length > 0 
+                        ? Object.values(averagedKPIs).reduce((sum, kpi) => sum + kpi.avgScore, 0) / Object.values(averagedKPIs).length 
+                        : 0,
+                    totalMonths: Object.keys(allMonthsData).length
+                }
+            };
+            
+            return allMonthsData;
+        } catch (error) {
+            console.error("Error in getAllMonthsStaffKPIDetailsById:", error);
+            throw error;
+        }
+    }
+
+    async getAllMonthsStaffDailyKPIDetailsById(staffId, year) {
+        try {
+            const months = [
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"
+            ];
+            
+            const allMonthsData = {};
+            const monthlyAggregatedData = {}; // New structure for aggregated monthly data
+            const kpiAverages = {}; // Store averages for each KPI across all months
+            
+            for (let monthIndex = 0; monthIndex < 12; monthIndex++) {
+                const monthName = months[monthIndex];
+                const monthNumber = monthIndex + 1;
+                
+                try {
+                    const monthData = await this.getStaffDailyKPIDetailsById(staffId, null, null, monthNumber, year);
+                    if (monthData) {
+                        allMonthsData[monthName] = monthData;
+                        
+                        // Aggregate daily KPI data by month
+                        if (monthData.dailyKPIScores && Object.keys(monthData.dailyKPIScores).length > 0) {
+                            const monthKPIAggregates = {};
+                            
+                            // Collect all daily data for this month
+                            Object.keys(monthData.dailyKPIScores).forEach(dateKey => {
+                                const dayData = monthData.dailyKPIScores[dateKey];
+                                Object.keys(dayData).forEach(kpiName => {
+                                    const kpiData = dayData[kpiName];
+                                    
+                                    if (!monthKPIAggregates[kpiName]) {
+                                        monthKPIAggregates[kpiName] = {
+                                            totalPoints: 0,
+                                            totalWeight: 0,
+                                            totalScore: 0,
+                                            count: 0
+                                        };
+                                    }
+                                    
+                                    monthKPIAggregates[kpiName].totalPoints += kpiData.avgPoints || 0;
+                                    monthKPIAggregates[kpiName].totalWeight += kpiData.weight || 0;
+                                    monthKPIAggregates[kpiName].totalScore += kpiData.avgScore || 0;
+                                    monthKPIAggregates[kpiName].count++;
+                                });
+                            });
+                            
+                            // Calculate averages for this month
+                            const monthKPIData = {};
+                            Object.keys(monthKPIAggregates).forEach(kpiName => {
+                                const agg = monthKPIAggregates[kpiName];
+                                monthKPIData[kpiName] = {
+                                    avgPoints: agg.count > 0 ? Math.round((agg.totalPoints / agg.count) * 10) / 10 : 0,
+                                    weight: agg.count > 0 ? Math.round((agg.totalWeight / agg.count) * 10) / 10 : 0,
+                                    avgScore: agg.count > 0 ? Math.round((agg.totalScore / agg.count) * 10) / 10 : 0,
+                                    count: agg.count
+                                };
+                            });
+                            
+                            monthlyAggregatedData[monthName] = monthKPIData;
+                        }
+                        
+                        // Collect KPI data for overall averaging from daily scores
+                        if (monthData.dailyKPIScores) {
+                            Object.keys(monthData.dailyKPIScores).forEach(dateKey => {
+                                const dayData = monthData.dailyKPIScores[dateKey];
+                                Object.keys(dayData).forEach(kpiName => {
+                                    const kpiData = dayData[kpiName];
+                                    if (!kpiAverages[kpiName]) {
+                                        kpiAverages[kpiName] = {
+                                            points: [],
+                                            weights: [],
+                                            scores: [],
+                                            count: 0
+                                        };
+                                    }
+                                    kpiAverages[kpiName].points.push(kpiData.avgPoints || 0);
+                                    kpiAverages[kpiName].weights.push(kpiData.weight || 0);
+                                    kpiAverages[kpiName].scores.push(kpiData.avgScore || 0);
+                                    kpiAverages[kpiName].count++;
+                                });
+                            });
+                        }
+                    }
+                } catch (error) {
+                    console.log(`No data for ${monthName} ${year}:`, error.message);
+                    // Continue with next month if no data
+                }
+            }
+            
+            // Calculate overall averages for each KPI across all months
+            const averagedKPIs = {};
+            Object.keys(kpiAverages).forEach(kpiName => {
+                const kpiData = kpiAverages[kpiName];
+                const avgPoints = kpiData.points.length > 0 
+                    ? kpiData.points.reduce((sum, point) => sum + point, 0) / kpiData.points.length 
+                    : 0;
+                const avgWeight = kpiData.weights.length > 0 
+                    ? kpiData.weights.reduce((sum, weight) => sum + weight, 0) / kpiData.weights.length 
+                    : 0;
+                const avgScore = kpiData.scores.length > 0 
+                    ? kpiData.scores.reduce((sum, score) => sum + score, 0) / kpiData.scores.length 
+                    : 0;
+                
+                averagedKPIs[kpiName] = {
+                    avgPoints: Math.round(avgPoints * 10) / 10,
+                    avgWeight: Math.round(avgWeight * 10) / 10,
+                    avgScore: Math.round(avgScore * 10) / 10,
+                    count: kpiData.count
+                };
+            });
+            
+            // Return both detailed and aggregated data
+            return {
+                ...allMonthsData,
+                monthlyAggregatedData, // New: Aggregated data by month
+                _averages: {
+                    dailyKPIScores: averagedKPIs,
+                    dailySummary: {
+                        avgPoints: Object.values(averagedKPIs).length > 0 
+                            ? Object.values(averagedKPIs).reduce((sum, kpi) => sum + kpi.avgPoints, 0) / Object.values(averagedKPIs).length 
+                            : 0,
+                        avgWeight: Object.values(averagedKPIs).length > 0 
+                            ? Object.values(averagedKPIs).reduce((sum, kpi) => sum + kpi.avgWeight, 0) / Object.values(averagedKPIs).length 
+                            : 0,
+                        avgScore: Object.values(averagedKPIs).length > 0 
+                            ? Object.values(averagedKPIs).reduce((sum, kpi) => sum + kpi.avgScore, 0) / Object.values(averagedKPIs).length 
+                            : 0,
+                        totalMonths: Object.keys(allMonthsData).length
+                    }
+                }
+            };
+        } catch (error) {
+            console.error("Error in getAllMonthsStaffDailyKPIDetailsById:", error);
+            throw error;
+        }
+    }
+
+    async getAllMonthsStaffWeeklyKPIDetailsById(staffId, year) {
+        try {
+            const months = [
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"
+            ];
+            
+            const allMonthsData = {};
+            const monthlyAggregatedData = {}; // New structure for aggregated monthly data
+            const kpiAverages = {}; // Store averages for each KPI across all months
+            
+            for (let monthIndex = 0; monthIndex < 12; monthIndex++) {
+                const monthName = months[monthIndex];
+                const monthNumber = monthIndex + 1;
+                
+                try {
+                    const monthData = await this.getStaffWeeklyKPIDetailsById(staffId, null, null, monthNumber, year);
+                    if (monthData) {
+                        allMonthsData[monthName] = monthData;
+                        
+                        // Aggregate weekly KPI data by month
+                        if (monthData.weeklyKPIScores && Object.keys(monthData.weeklyKPIScores).length > 0) {
+                            const monthKPIAggregates = {};
+                            
+                            // Collect all weekly data for this month
+                            Object.keys(monthData.weeklyKPIScores).forEach(dateKey => {
+                                const weekData = monthData.weeklyKPIScores[dateKey];
+                                Object.keys(weekData).forEach(kpiName => {
+                                    const kpiData = weekData[kpiName];
+                                    
+                                    if (!monthKPIAggregates[kpiName]) {
+                                        monthKPIAggregates[kpiName] = {
+                                            totalPoints: 0,
+                                            totalWeight: 0,
+                                            totalScore: 0,
+                                            count: 0
+                                        };
+                                    }
+                                    
+                                    monthKPIAggregates[kpiName].totalPoints += kpiData.avgPoints || 0;
+                                    monthKPIAggregates[kpiName].totalWeight += kpiData.weight || 0;
+                                    monthKPIAggregates[kpiName].totalScore += kpiData.avgScore || 0;
+                                    monthKPIAggregates[kpiName].count++;
+                                });
+                            });
+                            
+                            // Calculate averages for this month
+                            const monthKPIData = {};
+                            Object.keys(monthKPIAggregates).forEach(kpiName => {
+                                const agg = monthKPIAggregates[kpiName];
+                                monthKPIData[kpiName] = {
+                                    avgPoints: agg.count > 0 ? Math.round((agg.totalPoints / agg.count) * 10) / 10 : 0,
+                                    weight: agg.count > 0 ? Math.round((agg.totalWeight / agg.count) * 10) / 10 : 0,
+                                    avgScore: agg.count > 0 ? Math.round((agg.totalScore / agg.count) * 10) / 10 : 0,
+                                    count: agg.count
+                                };
+                            });
+                            
+                            monthlyAggregatedData[monthName] = monthKPIData;
+                        }
+                        
+                        // Collect KPI data for overall averaging from weekly scores
+                        if (monthData.weeklyKPIScores) {
+                            Object.keys(monthData.weeklyKPIScores).forEach(dateKey => {
+                                const weekData = monthData.weeklyKPIScores[dateKey];
+                                Object.keys(weekData).forEach(kpiName => {
+                                    const kpiData = weekData[kpiName];
+                                    if (!kpiAverages[kpiName]) {
+                                        kpiAverages[kpiName] = {
+                                            points: [],
+                                            weights: [],
+                                            scores: [],
+                                            count: 0
+                                        };
+                                    }
+                                    kpiAverages[kpiName].points.push(kpiData.avgPoints || 0);
+                                    kpiAverages[kpiName].weights.push(kpiData.weight || 0);
+                                    kpiAverages[kpiName].scores.push(kpiData.avgScore || 0);
+                                    kpiAverages[kpiName].count++;
+                                });
+                            });
+                        }
+                    }
+                } catch (error) {
+                    console.log(`No data for ${monthName} ${year}:`, error.message);
+                    // Continue with next month if no data
+                }
+            }
+            
+            // Calculate overall averages for each KPI across all months
+            const averagedKPIs = {};
+            Object.keys(kpiAverages).forEach(kpiName => {
+                const kpiData = kpiAverages[kpiName];
+                const avgPoints = kpiData.points.length > 0 
+                    ? kpiData.points.reduce((sum, point) => sum + point, 0) / kpiData.points.length 
+                    : 0;
+                const avgWeight = kpiData.weights.length > 0 
+                    ? kpiData.weights.reduce((sum, weight) => sum + weight, 0) / kpiData.weights.length 
+                    : 0;
+                const avgScore = kpiData.scores.length > 0 
+                    ? kpiData.scores.reduce((sum, score) => sum + score, 0) / kpiData.scores.length 
+                    : 0;
+                
+                averagedKPIs[kpiName] = {
+                    avgPoints: Math.round(avgPoints * 10) / 10,
+                    avgWeight: Math.round(avgWeight * 10) / 10,
+                    avgScore: Math.round(avgScore * 10) / 10,
+                    count: kpiData.count
+                };
+            });
+            
+            // Return both detailed and aggregated data
+            return {
+                ...allMonthsData,
+                monthlyAggregatedData, // New: Aggregated data by month
+                _averages: {
+                    weeklyKPIScores: averagedKPIs,
+                    weeklySummary: {
+                        avgPoints: Object.values(averagedKPIs).length > 0 
+                            ? Object.values(averagedKPIs).reduce((sum, kpi) => sum + kpi.avgPoints, 0) / Object.values(averagedKPIs).length 
+                            : 0,
+                        avgWeight: Object.values(averagedKPIs).length > 0 
+                            ? Object.values(averagedKPIs).reduce((sum, kpi) => sum + kpi.avgWeight, 0) / Object.values(averagedKPIs).length 
+                            : 0,
+                        avgScore: Object.values(averagedKPIs).length > 0 
+                            ? Object.values(averagedKPIs).reduce((sum, kpi) => sum + kpi.avgScore, 0) / Object.values(averagedKPIs).length 
+                            : 0,
+                        totalMonths: Object.keys(allMonthsData).length
+                    }
+                }
+            };
+        } catch (error) {
+            console.error("Error in getAllMonthsStaffWeeklyKPIDetailsById:", error);
+            throw error;
+        }
+    }
+
+    async getAllMonthsStaffAttendanceReportById(staffId, year) {
+        try {
+            const months = [
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"
+            ];
+            
+            const allMonthsData = {};
+            
+            for (let monthIndex = 0; monthIndex < 12; monthIndex++) {
+                const monthName = months[monthIndex];
+                const monthNumber = monthIndex + 1;
+                
+                try {
+                    const monthData = await this.getStaffAttendanceReportById(staffId, null, null, monthNumber, year);
+                    if (monthData) {
+                        allMonthsData[monthName] = monthData;
+                    }
+                } catch (error) {
+                    console.log(`No data for ${monthName} ${year}:`, error.message);
+                    // Continue with next month if no data
+                }
+            }
+            
+            return allMonthsData;
+        } catch (error) {
+            console.error("Error in getAllMonthsStaffAttendanceReportById:", error);
+            throw error;
+        }
+    }
+
+    async getAllMonthsStaffSalesReportById(staffId, year) {
+        try {
+            const months = [
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"
+            ];
+            
+            const allMonthsData = {};
+            
+            for (let monthIndex = 0; monthIndex < 12; monthIndex++) {
+                const monthName = months[monthIndex];
+                const monthNumber = monthIndex + 1;
+                
+                try {
+                    const monthData = await this.getStaffSalesReportById(staffId, null, null, monthNumber, year);
+                    if (monthData) {
+                        allMonthsData[monthName] = monthData;
+                    }
+                } catch (error) {
+                    console.log(`No data for ${monthName} ${year}:`, error.message);
+                    // Continue with next month if no data
+                }
+            }
+            
+            return allMonthsData;
+        } catch (error) {
+            console.error("Error in getAllMonthsStaffSalesReportById:", error);
+            throw error;
+        }
+    }
+
+    async getAllMonthsAttendanceReport(year) {
+        try {
+            const months = [
+                "January", "February", "March", "April", "May", "June",
+                "July", "August", "September", "October", "November", "December"
+            ];
+            
+            const allMonthsData = {};
+            
+            for (let monthIndex = 0; monthIndex < 12; monthIndex++) {
+                const monthName = months[monthIndex];
+                const monthNumber = monthIndex + 1;
+                
+                try {
+                    const monthData = await this.getAttendanceReport(monthNumber, year);
+                    if (monthData) {
+                        allMonthsData[monthName] = monthData;
+                    }
+                } catch (error) {
+                    console.log(`No data for ${monthName} ${year}:`, error.message);
+                    // Continue with next month if no data
+                }
+            }
+            
+            return allMonthsData;
+        } catch (error) {
+            console.error("Error in getAllMonthsAttendanceReport:", error);
+            throw error;
         }
     }
 }

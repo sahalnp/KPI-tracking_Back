@@ -408,7 +408,7 @@ export const getEditScore = async (req, res) => {
 export const updateScore = async (req, res) => {
     try {
         const staffId = req.params.id;
-        const kpis = await storage.updateScoreEmployee(staffId, req.body);
+        const kpis = await storage.updateScoreEmployee(req.user.id,staffId, req.body);
         console.log(kpis, "sdfkksdfjkljn");
 
         return res.status(200).json({ success: true, kpis });
@@ -422,8 +422,8 @@ export const updateScore = async (req, res) => {
 
 export const staffReport = async (req, res) => {
     try {
-        const { start, end } = req.query;
-        console.log("Staff Report Request - Start:", start, "End:", end);
+        const { start, end, month, year } = req.query;
+        console.log("Staff Report Request - Start:", start, "End:", end, "Month:", month, "Year:", year);
 
         // Validate date parameters if provided
         if (start && end) {
@@ -447,7 +447,7 @@ export const staffReport = async (req, res) => {
 
         // Get staff report data
         console.log("Calling storage.getStaffReport...");
-        const staffReportData = await storage.getStaffReport(start, end);
+        const staffReportData = await storage.getStaffReport(start, end, month, year);
         console.log("Staff Report Data:", staffReportData);
 
         // Calculate summary statistics
@@ -481,10 +481,72 @@ export const staffReport = async (req, res) => {
     }
 };
 
+// New function to get staff report grouped by month
+export const staffReportByMonth = async (req, res) => {
+    try {
+        const { start, end, month, year } = req.query;
+        console.log("Staff Report By Month Request - Start:", start, "End:", end, "Month:", month, "Year:", year);
+
+        // Validate date parameters if provided
+        if (start && end) {
+            const startDate = new Date(start);
+            const endDate = new Date(end);
+
+            if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+                return res.status(400).json({
+                    success: false,
+                    error: "Invalid date format. Please provide dates in YYYY-MM-DD format",
+                });
+            }
+
+            if (startDate > endDate) {
+                return res.status(400).json({
+                    success: false,
+                    error: "Start date cannot be greater than end date",
+                });
+            }
+        }
+
+        // Get staff report data grouped by month
+        console.log("Calling storage.getStaffReportByMonth...");
+        const staffReportByMonthData = await storage.getStaffReportByMonth(start, end, month, year);
+        console.log("Staff Report By Month Data:", staffReportByMonthData);
+
+        // Calculate summary statistics for each month
+        const monthSummaries = {};
+        Object.keys(staffReportByMonthData).forEach(monthName => {
+            const monthStaff = staffReportByMonthData[monthName];
+            const totalStaff = monthStaff.length;
+            const avgScore = totalStaff > 0 
+                ? Math.round(monthStaff.reduce((sum, staff) => sum + staff.avgScore, 0) / totalStaff)
+                : 0;
+            
+            monthSummaries[monthName] = {
+                totalStaff,
+                avgScore
+            };
+        });
+
+        console.log("Month Summaries:", monthSummaries);
+
+        return res.status(200).json({
+            success: true,
+            staffReportByMonth: staffReportByMonthData,
+            monthSummaries,
+        });
+    } catch (error) {
+        console.error("Staff report by month error:", error);
+        return res.status(500).json({
+            success: false,
+            error: "Failed to generate staff report by month. Please try again later.",
+        });
+    }
+};
+
 export const exportStaffReport = async (req, res) => {
     try {
-        const { start, end, format } = req.query;
-        const staffReport = await storage.getStaffReport(start, end);
+        const { start, end, format, month, year } = req.query;
+        const staffReport = await storage.getStaffReport(start, end, month, year);
 
         // 1. NEVER return 404 JSON – always send a file
         if (!staffReport || staffReport.length === 0) {
@@ -827,6 +889,8 @@ export const exportSalesReport = async (req, res) => {
 };
 
 export const attendanceReport = async (req, res) => {
+    console.log();
+    
     try {
         const { month, year } = req.query;
         const { attendance, summary } = await storage.getAttendanceReport(
@@ -1199,17 +1263,24 @@ export const checkIdExists = async (req, res) => {
 
 export const getFloorAttendanceData = async (req, res) => {
     try {
+        console.log("🔍 getFloorAttendanceData called");
         const data = await storage.getFloorAttendanceData();
-        res.status(200).json({ data });
+        console.log("📊 Returning attendance data:", data);
+        res.status(200).json({ success: true, data });
     } catch (error) {
         console.error("Error fetching floor attendance data:", error);
-        res.status(500).json({ message: "Error fetching floor attendance data" });
+        res.status(500).json({ 
+            success: false,
+            message: "Error fetching floor attendance data" 
+        });
     }
 };
 
 export const getFloors = async (req, res) => {
     try {
+        console.log("🔍 getFloors called");
         const floors = await storage.getFloors();
+        console.log("📊 Returning floors:", floors);
         res.status(200).json({ floors });
     } catch (error) {
         console.error("Error fetching floors:", error);
@@ -1305,5 +1376,295 @@ export const searchStaff = async (req, res) => {
     } catch (error) {
         console.error("Error searching staff:", error);
         res.status(500).json({ message: "Error searching staff" });
+    }
+};
+
+export const getStaffKPIDetails = async (req, res) => {
+    try {
+        const { id } = req.params; // This is the database UUID
+        const { start, end, month, year } = req.query;
+        
+        console.log("Staff KPI Details Request - ID:", id, "Start:", start, "End:", end, "Month:", month, "Year:", year);
+
+        const staffKPIDetails = await storage.getStaffKPIDetailsById(id, start, end, month, year);
+        
+        return res.status(200).json({
+            success: true,
+            data: staffKPIDetails,
+        });
+    } catch (error) {
+        console.error("Staff KPI details error:", error.message, error);
+        const statusCode = error.message.includes("not found") ? 404 : 500;
+        return res.status(statusCode).json({
+            success: false,
+            error: error.message || "Failed to fetch staff KPI details. Please try again later.",
+        });
+    }
+};
+
+export const getStaffDailyKPIDetails = async (req, res) => {
+    try {
+        const { id } = req.params; // This is the database UUID
+        const { start, end, month, year } = req.query;
+        
+        console.log("Staff Daily KPI Details Request - ID:", id, "Start:", start, "End:", end, "Month:", month, "Year:", year);
+
+        const staffDailyKPIDetails = await storage.getStaffDailyKPIDetailsById(id, start, end, month, year);
+        
+        return res.status(200).json({
+            success: true,
+            data: staffDailyKPIDetails,
+        });
+    } catch (error) {
+        console.error("Staff Daily KPI details error:", error.message, error);
+        const statusCode = error.message.includes("not found") ? 404 : 500;
+        return res.status(statusCode).json({
+            success: false,
+            error: error.message || "Failed to fetch staff daily KPI details. Please try again later.",
+        });
+    }
+};
+
+export const getStaffWeeklyKPIDetails = async (req, res) => {
+    try {
+        const { id } = req.params; // This is the database UUID
+        const { start, end, month, year } = req.query;
+        
+        console.log("Staff Weekly KPI Details Request - ID:", id, "Start:", start, "End:", end, "Month:", month, "Year:", year);
+
+        const staffWeeklyKPIDetails = await storage.getStaffWeeklyKPIDetailsById(id, start, end, month, year);
+        
+        return res.status(200).json({
+            success: true,
+            data: staffWeeklyKPIDetails,
+        });
+    } catch (error) {
+        console.error("Staff Weekly KPI details error:", error.message, error);
+        const statusCode = error.message.includes("not found") ? 404 : 500;
+        return res.status(statusCode).json({
+            success: false,
+            error: error.message || "Failed to fetch staff weekly KPI details. Please try again later.",
+        });
+    }
+};
+
+export const getStaffAttendanceReport = async (req, res) => {
+    try {
+        const { id } = req.params; // This is the database UUID
+        const { start, end, month, year } = req.query;
+        
+        console.log("Staff Attendance Report Request - ID:", id, "Start:", start, "End:", end, "Month:", month, "Year:", year);
+
+        const attendanceReport = await storage.getStaffAttendanceReportById(id, start, end, month, year);
+        
+        return res.status(200).json({
+            success: true,
+            data: attendanceReport,
+        });
+    } catch (error) {
+        console.error("Staff attendance report error:", error.message, error);
+        const statusCode = error.message.includes("not found") ? 404 : 500;
+        return res.status(statusCode).json({
+            success: false,
+            error: error.message || "Failed to fetch staff attendance report. Please try again later.",
+        });
+    }
+};
+
+export const getStaffSalesReport = async (req, res) => {
+    try {
+        const { id } = req.params; // This is the database UUID
+        const { start, end, month, year } = req.query;
+        
+        console.log("Staff Sales Report Request - ID:", id, "Start:", start, "End:", end, "Month:", month, "Year:", year);
+
+        const salesReport = await storage.getStaffSalesReportById(id, start, end, month, year);
+        
+        return res.status(200).json({
+            success: true,
+            data: salesReport,
+        });
+    } catch (error) {
+        console.error("Staff sales report error:", error.message, error);
+        const statusCode = error.message.includes("not found") ? 404 : 500;
+        return res.status(statusCode).json({
+            success: false,
+            error: error.message || "Failed to fetch staff sales report. Please try again later.",
+        });
+    }
+};
+
+// All Months API Endpoints
+export const getAllMonthsStaffKPIDetails = async (req, res) => {
+    try {
+        const { id } = req.params; // This is the database UUID
+        const { year } = req.query;
+        
+        console.log("All Months Staff KPI Details Request - ID:", id, "Year:", year);
+
+        const allMonthsData = await storage.getAllMonthsStaffKPIDetailsById(id, year);
+        
+        return res.status(200).json({
+            success: true,
+            data: allMonthsData,
+        });
+    } catch (error) {
+        console.error("All Months Staff KPI details error:", error.message, error);
+        const statusCode = error.message.includes("not found") ? 404 : 500;
+        return res.status(statusCode).json({
+            success: false,
+            error: error.message || "Failed to fetch all months staff KPI details. Please try again later.",
+        });
+    }
+};
+
+export const getAllMonthsStaffDailyKPIDetails = async (req, res) => {
+    try {
+        const { id } = req.params; // This is the database UUID
+        const { year } = req.query;
+        
+        console.log("All Months Staff Daily KPI Details Request - ID:", id, "Year:", year);
+
+        const allMonthsData = await storage.getAllMonthsStaffDailyKPIDetailsById(id, year);
+        
+        return res.status(200).json({
+            success: true,
+            data: allMonthsData,
+        });
+    } catch (error) {
+        console.error("All Months Staff Daily KPI details error:", error.message, error);
+        const statusCode = error.message.includes("not found") ? 404 : 500;
+        return res.status(statusCode).json({
+            success: false,
+            error: error.message || "Failed to fetch all months staff daily KPI details. Please try again later.",
+        });
+    }
+};
+
+export const getAllMonthsStaffWeeklyKPIDetails = async (req, res) => {
+    try {
+        const { id } = req.params; // This is the database UUID
+        const { year } = req.query;
+        
+        console.log("All Months Staff Weekly KPI Details Request - ID:", id, "Year:", year);
+
+        const allMonthsData = await storage.getAllMonthsStaffWeeklyKPIDetailsById(id, year);
+        
+        return res.status(200).json({
+            success: true,
+            data: allMonthsData,
+        });
+    } catch (error) {
+        console.error("All Months Staff Weekly KPI details error:", error.message, error);
+        const statusCode = error.message.includes("not found") ? 404 : 500;
+        return res.status(statusCode).json({
+            success: false,
+            error: error.message || "Failed to fetch all months staff weekly KPI details. Please try again later.",
+        });
+    }
+};
+
+export const getWeeklyKPIByMonth = async (req, res) => {
+    try {
+        const { id } = req.params; // This is the database UUID
+        const { year } = req.query;
+        
+        console.log("=== GET WEEKLY KPI BY MONTH REQUEST ===");
+        console.log("Staff ID:", id);
+        console.log("Year:", year);
+        console.log("=======================================");
+
+        const allMonthsData = await storage.getAllMonthsStaffWeeklyKPIDetailsById(id, year);
+        
+        // Extract only the aggregated monthly data
+        const monthlyAggregatedData = allMonthsData.monthlyAggregatedData || {};
+        
+        console.log("=== WEEKLY KPI BY MONTH RESPONSE ===");
+        console.log("Available months:", Object.keys(monthlyAggregatedData));
+        console.log("Sample data:", Object.keys(monthlyAggregatedData).length > 0 ? monthlyAggregatedData[Object.keys(monthlyAggregatedData)[0]] : 'No data');
+        console.log("====================================");
+        
+        return res.status(200).json({
+            success: true,
+            data: {
+                monthlyAggregatedData,
+                staff: allMonthsData.January?.staff || allMonthsData.February?.staff || allMonthsData.March?.staff || null,
+            },
+        });
+    } catch (error) {
+        console.error("Get Weekly KPI by Month error:", error.message, error);
+        const statusCode = error.message.includes("not found") ? 404 : 500;
+        return res.status(statusCode).json({
+            success: false,
+            error: error.message || "Failed to fetch weekly KPI by month. Please try again later.",
+        });
+    }
+};
+
+export const getAllMonthsStaffAttendanceReport = async (req, res) => {
+    try {
+        const { id } = req.params; // This is the database UUID
+        const { year } = req.query;
+        
+        console.log("All Months Staff Attendance Report Request - ID:", id, "Year:", year);
+
+        const allMonthsData = await storage.getAllMonthsStaffAttendanceReportById(id, year);
+        
+        return res.status(200).json({
+            success: true,
+            data: allMonthsData,
+        });
+    } catch (error) {
+        console.error("All Months Staff Attendance Report error:", error.message, error);
+        const statusCode = error.message.includes("not found") ? 404 : 500;
+        return res.status(statusCode).json({
+            success: false,
+            error: error.message || "Failed to fetch all months staff attendance report. Please try again later.",
+        });
+    }
+};
+
+export const getAllMonthsStaffSalesReport = async (req, res) => {
+    try {
+        const { id } = req.params; // This is the database UUID
+        const { year } = req.query;
+        
+        console.log("All Months Staff Sales Report Request - ID:", id, "Year:", year);
+
+        const allMonthsData = await storage.getAllMonthsStaffSalesReportById(id, year);
+        
+        return res.status(200).json({
+            success: true,
+            data: allMonthsData,
+        });
+    } catch (error) {
+        console.error("All Months Staff Sales Report error:", error.message, error);
+        const statusCode = error.message.includes("not found") ? 404 : 500;
+        return res.status(statusCode).json({
+            success: false,
+            error: error.message || "Failed to fetch all months staff sales report. Please try again later.",
+        });
+    }
+};
+
+export const getAllMonthsAttendanceReport = async (req, res) => {
+    try {
+        const { year } = req.query;
+        
+        console.log("All Months Attendance Report Request - Year:", year);
+
+        const allMonthsData = await storage.getAllMonthsAttendanceReport(year);
+        
+        return res.status(200).json({
+            success: true,
+            data: allMonthsData,
+        });
+    } catch (error) {
+        console.error("All Months Attendance Report error:", error.message, error);
+        const statusCode = error.message.includes("not found") ? 404 : 500;
+        return res.status(statusCode).json({
+            success: false,
+            error: error.message || "Failed to fetch all months attendance report. Please try again later.",
+        });
     }
 };
