@@ -95,6 +95,7 @@ model Attendance {
   fullDays       String
   leaveCount     String
   totalDays      String
+  totalDaysInMonth Int? 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   staff          User     @relation("AttendanceStaff", fields: [staffId], references: [id])
